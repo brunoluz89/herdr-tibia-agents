@@ -5,6 +5,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
 import { LOOT } from "./loot.js";
 import { MONSTERS, SPELLS } from "./fights.js";
+import { OUTFITS } from "./outfits.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -61,10 +62,18 @@ const SCENE_RATIO = 96 / 64;
 const SPELL_STEPS = 9; // 5 of flight and 4 of hit, as rendered by tibia860.py.
 const SPELL_FRAMES = [...Array(SPELL_STEPS).keys(), null];
 const SLEEP_FRAMES = [...Array(7).keys(), null]; // Effect 33's phases.
-const OUTFITS = new Set(["128", "129", "130", "131", "132", "133", "134", "136", "137", "138", "139", "140", "141", "142", "144"]);
+const LOOKTYPES = new Set(OUTFITS.flatMap(([, male, female]) => [String(male), String(female)]));
 const outfitId = () => {
   const outfit = String(shared("tibia.outfit"));
-  return OUTFITS.has(outfit) ? outfit : "130";
+  return LOOKTYPES.has(outfit) ? outfit : "130";
+};
+
+// The outfit picker: a grid of every outfit for one sex.
+const PICKER_COLUMNS = 6;
+const PICKER_CELL = { w: 72, h: 76 };
+const PICKER_SIZE = {
+  width: PICKER_COLUMNS * PICKER_CELL.w + 12,
+  height: Math.ceil(OUTFITS.length / PICKER_COLUMNS) * PICKER_CELL.h + 48,
 };
 
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
@@ -100,7 +109,7 @@ function icon(p, size, color) {
 
 export default class Agents extends View {
   init(_props, cx) {
-    if (props()?.sortMenu) return;
+    if (props()?.sortMenu || props()?.outfitMenu) return;
     this.folded = new Set();
     this.animations = {
       attack: { frames: ATTACK_FRAMES, step: 85, pause: 320, index: 0 },
@@ -190,6 +199,63 @@ export default class Agents extends View {
         .child(svg(`mods/workspace-chrome/${s.icon}.svg`).size(14).flex_none().text_color(t.muted))
         .child(div().flex_1().child(s.label))
         .when(s.id === on, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).flex_none().text_color(t.foreground)))));
+  }
+
+  outfitMenu(t) {
+    const current = outfitId();
+    // Opens on the chosen outfit's sex.
+    this.female ??= OUTFITS.some(([, , female]) => String(female) === current);
+    const rows = [];
+    for (let i = 0; i < OUTFITS.length; i += PICKER_COLUMNS) rows.push(OUTFITS.slice(i, i + PICKER_COLUMNS));
+    const toggle = (label, female) => div()
+      .id(`sex-${label}`)
+      .px(8)
+      .py(2)
+      .rounded(6)
+      .text_size(11)
+      .text_color(this.female === female ? t.foreground : t.dim)
+      .when(this.female === female, (el) => el.bg(t.hover))
+      .hover((s) => s.text_color(t.foreground))
+      .on_click((_e, cx) => {
+        this.female = female;
+        cx.notify();
+      })
+      .child(label);
+    const cell = ([name, male, female]) => {
+      const id = String(this.female ? female : male);
+      return v_flex()
+        .id(`outfit-${id}`)
+        .w(PICKER_CELL.w)
+        .h(PICKER_CELL.h)
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .gap(2)
+        .rounded(7)
+        .when(id === current, (el) => el.bg(t.hover).border_1().border_color(t.input))
+        .hover((s) => s.bg(t.hover))
+        .on_click(() => {
+          setShared("tibia.outfit", id);
+          closeOverlay(props().overlay);
+        })
+        .child(this.sprite("idle", 52, id))
+        .child(div().max_w(PICKER_CELL.w).truncate().text_size(10)
+          .text_color(id === current ? t.foreground : t.muted).child(name));
+    };
+    return v_flex()
+      .size_full()
+      .p(5)
+      .bg(t.popover)
+      .child(h_flex()
+        .h(30)
+        .flex_none()
+        .px(6)
+        .gap(4)
+        .items_center()
+        .child(div().flex_1().text_size(11).text_color(t.dim).child("Outfit"))
+        .child(toggle("Male", false))
+        .child(toggle("Female", true)))
+      .children(rows.map((row) => h_flex().flex_none().children(row.map(cell))));
   }
 
   peek(addr) {
@@ -374,6 +440,7 @@ export default class Agents extends View {
   render(cx) {
     const t = theme();
     if (props()?.sortMenu) return this.sortMenu(t);
+    if (props()?.outfitMenu) return this.outfitMenu(t);
     for (const animation of Object.values(this.animations)) animation.drawn = false;
     const collapsed = narrow();
     const sort = sortOf();
@@ -597,16 +664,28 @@ export default class Agents extends View {
             .items_center()
             .justify_between()
             .child(div().text_size(11.5).font_medium().text_color(t.dim).child("Agents"))
-            .child(
-              div()
-                .id("ag-sort")
-                .text_size(11)
-                .text_color(t.dim)
-                .hover((s) => s.text_color(t.foreground))
-                .on_click(() => openOverlay({ mod: "agents-tibia", kind: "popup", width: 200, height: 140, props: { sortMenu: true } }))
-                .tooltip(`Sort agents: ${sort.label}`)
-                .child(svg(`mods/workspace-chrome/${sort.icon}.svg`).size(14)),
-            ),
+            .child(h_flex()
+              .gap(8)
+              .items_center()
+              .child(
+                div()
+                  .id("ag-outfit")
+                  .rounded(5)
+                  .hover((s) => s.bg(t.hover))
+                  .on_click(() => openOverlay({ mod: "agents-tibia", kind: "popup", ...PICKER_SIZE, props: { outfitMenu: true } }))
+                  .tooltip("Choose outfit")
+                  .child(this.sprite("idle", 30, outfitId())),
+              )
+              .child(
+                div()
+                  .id("ag-sort")
+                  .text_size(11)
+                  .text_color(t.dim)
+                  .hover((s) => s.text_color(t.foreground))
+                  .on_click(() => openOverlay({ mod: "agents-tibia", kind: "popup", width: 200, height: 140, props: { sortMenu: true } }))
+                  .tooltip(`Sort agents: ${sort.label}`)
+                  .child(svg(`mods/workspace-chrome/${sort.icon}.svg`).size(14)),
+              )),
         ),
       )
       .when(list.length === 0 && !collapsed, (el) =>

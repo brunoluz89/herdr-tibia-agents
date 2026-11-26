@@ -1,8 +1,8 @@
 # Tibia Agents
 
 Herdr's left sidebar Agents panel, where every agent status is a small Tibia
-scene: a mage fighting a monster while the agent works, cornered when it needs
-you, standing over the loot when it is done, and dozing when it is idle.
+scene: your character fighting a monster while the agent works, cornered when it
+needs you, standing over the loot when it is done, and dozing when it is idle.
 
 ![Tibia Agents](preview.png)
 
@@ -11,7 +11,8 @@ you, standing over the loot when it is done, and dozing when it is idle.
 The `tibia` layout is the shipped `main` layout with only the Agents block
 replaced by this mod. Colors and type come from the active theme.
 
-- **Header** (41 px): "Agents" at 11.5 px, dim, and a 14 px sort icon.
+- **Header** (41 px): "Agents" at 11.5 px, dim; at the right, the chosen
+  character (30 px, the outfit picker button) and a 14 px sort icon.
 - **Priority view:** sections in the order Needs you, Done, Working, Idle, after
   Pinned when something is pinned. A section header is 76 px high: the agent
   count (dim), the section name in its status color, then one 96×64 scene. Rows
@@ -26,10 +27,10 @@ replaced by this mod. Colors and type come from the active theme.
 
 | Status | Panel (96×64) | Rail (20×20) |
 | --- | --- | --- |
-| Working | The mage stands bottom-left facing east and casts at a monster bottom-right, facing west. A missile flies in 5 frames, its hit effect shows in 4, 120 ms each, then 600 ms pause. | Mage in its walking frame, bobbing 1 px every 240 ms. |
-| Needs you (blocked) | The mage faces south on a blood splatter, the monster right beside. A blood burst plays on the mage: 6 frames, 85 ms each, then 320 ms pause. | Mage with the burst. |
-| Done | Still: the mage as in Working, the monster's corpse where it stood, one loot item on the corpse. | Mage beside the item. |
-| Idle | The mage as in Working with Zzz beside its head: 7 frames, 220 ms each, then 660 ms pause. | Mage facing south, still. |
+| Working | The character stands bottom-left facing east and casts at a monster bottom-right, facing west. A missile flies in 5 frames, its hit effect shows in 4, 120 ms each, then 600 ms pause. | Character in its walking frame, bobbing 1 px every 240 ms. |
+| Needs you (blocked) | The character faces south on a blood splatter, the monster right beside. A blood burst plays on the character: 6 frames, 85 ms each, then 320 ms pause. | Character with the burst. |
+| Done | Still: the character as in Working, the monster's corpse where it stood, one loot item on the corpse. | Character beside the item. |
+| Idle | The character as in Working with Zzz beside its head: 7 frames, 220 ms each, then 660 ms pause. | Character facing south, still. |
 
 - The monster is picked when an agent starts working and stays through Needs you
   and Done. The spell is picked per working stretch, the loot per completion.
@@ -49,14 +50,23 @@ replaced by this mod. Colors and type come from the active theme.
 - Click a header to fold its group. A row's chevron, or its program icon, folds
   its sub-agents.
 - The sort icon opens a 200×140 popup: Priority or Grouped by space.
+- The header character opens a 444×352 popup: a Male/Female toggle and a grid of
+  24 outfits (6 columns, 72×76 cells, 52 px sprite and name), the current one
+  highlighted. It opens on the current sex. Clicking an outfit changes every
+  scene and closes the popup. Outfits: Citizen, Hunter, Mage, Knight, Noble,
+  Summoner, Warrior, Barbarian, Druid, Wizard, Oriental, Pirate, Assassin,
+  Beggar, Shaman, Norse, Nightmare, Jester, Brotherhood, Demon Hunter,
+  Yalaharian, Newly Wed, Warmaster, Wayfarer. The male mage is the default.
 - A sub-agent without a pane counts `error` as blocked and `done` as idle.
 
 ## Built from
 
-- One mod, `agents-tibia` (`main.js`, `loot.js`, `fights.js`, `sprites/`), a
-  modified copy of the shipped `agents` mod of Herdr 0.1.18. Its `mod.json` has
-  `"place": "none"`. The layout puts it in the block with id `agents`.
-- Props: `{ sortMenu: true }` renders the sort popup; no props renders the panel.
+- One mod, `agents-tibia` (`main.js`, `outfits.js`, `loot.js`, `fights.js`,
+  `sprites/`), a modified copy of the shipped `agents` mod of Herdr 0.1.18. Its
+  `mod.json` has `"place": "none"`. The layout puts it in the block with id
+  `agents`.
+- Props: `{ sortMenu: true }` renders the sort popup, `{ outfitMenu: true }` the
+  outfit picker; no props renders the panel.
 - `herdr` functions: `agents`, `terminals`, `panes`, `focused`, `spaces`, `run`,
   `theme`, `shared`, `setShared`, `setAgentOrder`, `openOverlay`,
   `closeOverlay`, `props`, `window`, `layout`.
