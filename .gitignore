@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.DS_Store
+# Written by Herdr beside an installed mod
+gpui-kit.d.ts
+jsconfig.json
