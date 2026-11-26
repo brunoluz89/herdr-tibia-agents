@@ -15,7 +15,6 @@ from struct import unpack_from
 
 from PIL import Image, ImageDraw
 
-OUTFITS = (128, 129, 130, 131, 132, 133, 134, 136, 137, 138, 139, 140, 141, 142, 144)
 ATTACK_EFFECT = 1
 PREVIEW_LOOT = (3036, 3280, 3365)  # The preview sheet's samples.
 ITEM_FRAMES = {3031: (3, 1)}  # Gold coins: the fullest pile, as if 100+ were dropped.
@@ -309,8 +308,8 @@ def save_sprite(sprites, path, image):
 
 
 def load_table(path, name):
-    """Read one of the mod's number tables, ignoring its comments."""
-    source = re.sub(r"//.*", "", path.read_text())
+    """Read the numbers of one of the mod's tables, ignoring comments and names."""
+    source = re.sub(r'//.*|"[^"]*"', "", path.read_text())
     body = re.search(rf"\b{name}\s*=\s*\[(.*?)\];", source, re.DOTALL)
     if not body:
         raise ValueError(f"No {name} table in {path}")
@@ -335,10 +334,13 @@ def main():
                         help="Loot table of the mod (default: mods/agents-tibia/loot.js)")
     parser.add_argument("--fights", type=Path, default=MOD / "fights.js",
                         help="Monster and spell tables of the mod (default: mods/agents-tibia/fights.js)")
+    parser.add_argument("--outfits", type=Path, default=MOD / "outfits.js",
+                        help="Outfit table of the mod (default: mods/agents-tibia/outfits.js)")
     args = parser.parse_args()
 
     archive = SpriteArchive(args.source / "Tibia.spr")
     dat = DatIndex(args.dat_index or args.source / "dat-index.json")
+    outfits = load_table(args.outfits, "OUTFITS")
     loot = load_table(args.loot, "LOOT")
     monster_ids = load_table(args.fights, "MONSTERS")
     monsters = list(zip(monster_ids[::2], monster_ids[1::2]))
@@ -416,7 +418,7 @@ def main():
     sample_ids = [item_id for item_id in PREVIEW_LOOT if item_id in loot_images][:3]
     labels = ("idle", "working", "need_help") + tuple(f"loot {item_id}" for item_id in sample_ids)
     samples = [loot_images[item_id] for item_id in sample_ids]
-    preview = Image.new("RGB", (52 + len(labels) * 80, 28 + len(OUTFITS) * 68), "#262626")
+    preview = Image.new("RGB", (52 + len(labels) * 80, 28 + len(outfits) * 68), "#262626")
     draw = ImageDraw.Draw(preview)
     for col, label in enumerate(labels):
         draw.text((54 + col * 80, 8), label, fill="white")
@@ -424,7 +426,7 @@ def main():
     with Image.open(attack / f"{attack_ids[0]}.png") as effect:
         preview_effect = effect.copy()
 
-    for row, outfit_id in enumerate(OUTFITS):
+    for row, outfit_id in enumerate(outfits):
         images = status_images(archive, dat.group("outfits", outfit_id))
         directory = sprites / str(outfit_id)
         padded_directory = sprites / "padded" / str(outfit_id)
@@ -446,7 +448,7 @@ def main():
     preview.save(args.source / "preview-860.png")
 
     print(f"attack sprite ids: {attack_ids}")
-    print(f"wrote {len(OUTFITS)} outfits, {len(loot_images)} loot items, "
+    print(f"wrote {len(outfits)} outfits, {len(loot_images)} loot items, "
           f"{len(monster_images)} monsters, {len(spell_images)} spells, "
           f"and {len(attack_ids)} attack frames to {sprites}")
 

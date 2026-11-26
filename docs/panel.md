@@ -9,9 +9,10 @@ The [generator](../tools/tibia860.py) draws each outfit pose with all of its
 addon layers, not just the base looktype, so the panel character wears the full
 outfit (for 130, the hat and the belt potion). It shades the outfit mask with
 gold hair (`#FFAA00`), an indigo top (`#3F3FCC`), brown trousers (`#B46337`),
-and gray boots (`#737373`). It rotates the frames −45° with bicubic resampling,
-crops all 12 poses in each outfit to shared bounds, and scales them onto a
-64×64 PNG canvas with Lanczos resampling. Outfits are 64×64 (2×2 tiles) in this
+and gray boots (`#737373`). Every outfit gets these colors; they are baked into
+the images. It rotates the frames −45° with bicubic resampling, crops all 12
+poses in each outfit to shared bounds, and scales them onto a 64×64 PNG canvas
+with Lanczos resampling. Outfits are 64×64 (2×2 tiles) in this
 pack; tiles are placed bottom-right first, following the client. The same script
 reads the mod's `loot.js` and renders each reward once for the rail into
 `sprites/done/` (bottom-right anchored, up to 29×32 px, small items doubled with
@@ -38,6 +39,12 @@ Scene sizes and positions are constants at the top of
 [`tools/tibia860.py`](../tools/tibia860.py); frame timing is in `main.js`.
 `SPELL_STEPS` there must match the generator's flight and hit steps, and
 `SLEEP_FRAMES` the phases of the sleep effect.
+
+## Outfits
+
+[`outfits.js`](../mods/agents-tibia/outfits.js) lists the picker's entries as
+`[name, male looktype, female looktype]`. The picker and the generator both read
+it. Add or remove a row, regenerate, and install; the popup grows with the rows.
 
 ## Changing monsters and spells
 

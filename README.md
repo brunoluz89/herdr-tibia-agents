@@ -4,12 +4,14 @@ Herdr's Agents panel, with an animated Tibia scene for each agent status.
 
 ![Tibia Agents](preview.png)
 
+Pick your character from 24 outfits, male or female, in the panel header.
+
 | Status | Scene |
 | --- | --- |
-| Needs you | The monster closes in; blood on the mage and the floor. |
+| Needs you | The monster closes in; blood on the character and the floor. |
 | Done | The monster's corpse with a piece of loot on it. |
-| Working | The mage casts a spell at a monster. |
-| Idle | The mage dozes. |
+| Working | The character casts a spell at a monster. |
+| Idle | The character dozes. |
 
 The art is CipSoft's, taken from Tibia client files. Keep this repository
 private, or remove `mods/agents-tibia/sprites/` **and its Git history** before
@@ -38,10 +40,12 @@ To go back: `herdr-app do layout.switch '{"name":"main"}'`.
 
 ## Customize
 
-- **Character:** set the Herdr shared setting `tibia.outfit` to 128–134,
-  136–142, or 144. The default is 130, the mage.
-- **Monsters, spells, loot:** edit `fights.js` or `loot.js` in
-  `mods/agents-tibia/`, regenerate the sprites, and run the installer.
+- **Character:** click the character in the panel header and pick one of 24
+  outfits, Citizen through Wayfarer, male or female. The default is the male
+  mage. To offer other outfits, edit `outfits.js` as below.
+- **Outfits, monsters, spells, loot:** edit `outfits.js`, `fights.js`, or
+  `loot.js` in `mods/agents-tibia/`, regenerate the sprites, and run the
+  installer.
 
 See [panel internals](docs/panel.md) for the sprite layers, previewing every
 status with demo agents, platform notes, and Herdr upgrades.
