@@ -43,6 +43,9 @@ To go back: `herdr-app do layout.switch '{"name":"main"}'`.
 - **Monsters, spells, loot:** edit `fights.js` or `loot.js` in
   `mods/agents-tibia/`, regenerate the sprites, and run the installer.
 
+See [panel internals](docs/panel.md) for the sprite layers, previewing every
+status with demo agents, platform notes, and Herdr upgrades.
+
 ## Regenerate the sprites
 
 Needs Pillow, plus `Tibia.spr` and `Tibia.dat` of the extended 8.6 profile
