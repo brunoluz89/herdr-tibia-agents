@@ -86,7 +86,8 @@ replaced by this mod. Colors and type come from the active theme.
   `spells/`, or `cornered/` and `melee/`, or `corpses/` and `rewards/`, or
   `sleep/`.
 - Outfits are shaded gold hair `#FFAA00`, indigo top `#3F3FCC`, brown trousers
-  `#B46337`, gray boots `#737373`, with every addon layer.
+  `#B46337`, gray boots `#737373`, with every addon layer. A character is 1.25×
+  its client art, or less to fit 44×62 px.
 
 ## Watch out
 
@@ -112,4 +113,6 @@ replaced by this mod. Colors and type come from the active theme.
 - Agents reporting `working`, `blocked`, `done`, and `idle` (OSC 7501) show
   their four scenes in priority headers and in grouped rows.
 - An agent going from working to blocked or done keeps its monster.
+- Picking an outfit in the header popup changes the character in every scene, and
+  the choice survives a restart.
 - The rail shows the 20 px sprites.

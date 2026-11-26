@@ -2,7 +2,7 @@
 
 Herdr's Agents panel, with an animated Tibia scene for each agent status.
 
-![Tibia Agents](preview.png)
+![The Agents panel and its outfit picker](preview.png)
 
 Pick your character in the panel header: 24 outfits and 7 retro ones, male or
 female.

@@ -9,6 +9,5 @@ female. The choice is kept in the Herdr shared setting `tibia.outfit` (a
 looktype). Missing or unknown values use 130.
 
 `outfits.js`, `loot.js`, and `fights.js` list the outfits, loot, monsters, and
-spells. After editing
-them, regenerate the sprites with `tools/tibia860.py` from the source
-repository and run its `install.py`.
+spells. After editing them, regenerate the sprites with `tools/tibia860.py` from
+the source repository and run its `install.py`.

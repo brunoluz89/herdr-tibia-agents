@@ -28,6 +28,10 @@ TILE = 32
 CANVAS = 64
 SCALE = CANVAS / 48  # The layout budgets below were tuned on a 48 px canvas.
 EDGE_PADDING = 3  # Matched by the macOS sprite renderer in agents-tibia/main.js.
+# Characters are drawn at CHARACTER_SCALE of their client art, or less to fit.
+CHARACTER_SCALE = 1.25
+CHARACTER_WIDTH = 44
+CHARACTER_HEIGHT = 62
 SOUTH = 2
 EAST = 1
 WEST = 3
@@ -156,40 +160,32 @@ def rotated_frame(archive, group, phase, direction):
 
 
 def status_images(archive, group):
-    poses = {(phase, direction): rotated_frame(archive, group, phase, direction)
-             for phase in range(group["phases"]) for direction in range(group["patternX"])}
-    boxes = [sprite.getbbox() for sprite in poses.values() if sprite.getbbox()]
-    bounds = (min(box[0] for box in boxes), min(box[1] for box in boxes),
-              max(box[2] for box in boxes), max(box[3] for box in boxes))
-    width, height = bounds[2] - bounds[0], bounds[3] - bounds[1]
-    scale = (CANVAS - 1) / max(width, height)
-    dimensions = round(width * scale), round(height * scale)
+    poses = {name: rotated_frame(archive, group, phase, direction)
+             for name, phase, direction in (("south", 0, SOUTH), ("east", 0, EAST), ("walking", 1, EAST))}
+    poses = {name: image.crop(image.getbbox()) for name, image in poses.items()}
+    # One scale per outfit, from the poses shown: a hat, weapon or cape shrinks
+    # its character only when it wouldn't fit the scene.
+    scale = min(CHARACTER_SCALE,
+                CHARACTER_WIDTH / max(image.width for image in poses.values()),
+                CHARACTER_HEIGHT / max(image.height for image in poses.values()))
+    south, east, walking = (
+        poses[name].resize((round(poses[name].width * scale), round(poses[name].height * scale)),
+                           Image.Resampling.LANCZOS)
+        for name in ("south", "east", "walking"))
 
-    def place_pose(phase, direction):
-        sprite = poses[phase, direction].crop(bounds).resize(dimensions, Image.Resampling.LANCZOS)
-        canvas = Image.new("RGBA", (CANVAS, CANVAS))
-        canvas.alpha_composite(sprite, ((CANVAS - sprite.width) // 2, CANVAS - sprite.height))
+    def placed(image, width, center, bottom):
+        canvas = Image.new("RGBA", (width, CANVAS))
+        canvas.alpha_composite(image, (max(center - image.width // 2, 0), bottom - image.height))
         return canvas
 
-    standing = place_pose(0, SOUTH)
-    images = {"idle": standing, "working": place_pose(1, EAST), "need_help": standing}
-    facing_reward = place_pose(0, EAST)
-    character = facing_reward.crop(facing_reward.getbbox())
-    character.thumbnail((round(33 * SCALE), round(44 * SCALE)), Image.Resampling.LANCZOS)
-    done = Image.new("RGBA", (CANVAS, CANVAS))
-    done.alpha_composite(character, (0, CANVAS - character.height))
-    images["done"] = done
-    # Cropped here, since the fight scenes have their own size budget.
-    caster = facing_reward.crop(facing_reward.getbbox())
-    caster.thumbnail((40, 56), Image.Resampling.LANCZOS)
-    fight = Image.new("RGBA", (FIGHT_WIDTH, CANVAS))
-    fight.alpha_composite(caster, (0, CANVAS - caster.height))
-    images["fight"] = fight
-    victim = standing.crop(standing.getbbox())
-    victim.thumbnail((40, 56), Image.Resampling.LANCZOS)
-    cornered = Image.new("RGBA", (FIGHT_WIDTH, CANVAS))
-    cornered.alpha_composite(victim, (CORNERED_CENTER - victim.width // 2, CANVAS - 2 - victim.height))
-    images["cornered"] = cornered
+    standing = placed(south, CANVAS, CANVAS // 2, CANVAS)
+    images = {"idle": standing, "working": placed(walking, CANVAS, CANVAS // 2, CANVAS),
+              "need_help": standing}
+    rewarded = east.copy()
+    rewarded.thumbnail((round(33 * SCALE), round(44 * SCALE)), Image.Resampling.LANCZOS)
+    images["done"] = placed(rewarded, CANVAS, 0, CANVAS)
+    images["fight"] = placed(east, FIGHT_WIDTH, 0, CANVAS)
+    images["cornered"] = placed(south, FIGHT_WIDTH, CORNERED_CENTER, CANVAS - 2)
     return images
 
 
