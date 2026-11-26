@@ -50,13 +50,15 @@ replaced by this mod. Colors and type come from the active theme.
 - Click a header to fold its group. A row's chevron, or its program icon, folds
   its sub-agents.
 - The sort icon opens a 200×140 popup: Priority or Grouped by space.
-- The header character opens a 444×352 popup: a Male/Female toggle and a grid of
-  24 outfits (6 columns, 72×76 cells, 52 px sprite and name), the current one
-  highlighted. It opens on the current sex. Clicking an outfit changes every
-  scene and closes the popup. Outfits: Citizen, Hunter, Mage, Knight, Noble,
-  Summoner, Warrior, Barbarian, Druid, Wizard, Oriental, Pirate, Assassin,
-  Beggar, Shaman, Norse, Nightmare, Jester, Brotherhood, Demon Hunter,
-  Yalaharian, Newly Wed, Warmaster, Wayfarer. The male mage is the default.
+- The header character opens a 588×376 popup: a Male/Female toggle, a grid of 24
+  outfits (8 columns, 72×76 cells, 52 px sprite and name), then a "Retro" label
+  and one row of 7, the current outfit highlighted. It opens on the current sex.
+  Clicking an outfit changes every scene and closes the popup. Outfits: Citizen,
+  Hunter, Mage, Knight, Noble, Summoner, Warrior, Barbarian, Druid, Wizard,
+  Oriental, Pirate, Assassin, Beggar, Shaman, Norse, Nightmare, Jester,
+  Brotherhood, Demon Hunter, Yalaharian, Newly Wed, Warmaster, Wayfarer. Retro:
+  the first seven in their oldschool looks, which have no addons. The male mage
+  is the default.
 - A sub-agent without a pane counts `error` as blocked and `done` as idle.
 
 ## Built from

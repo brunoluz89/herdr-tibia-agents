@@ -5,7 +5,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
 import { LOOT } from "./loot.js";
 import { MONSTERS, SPELLS } from "./fights.js";
-import { OUTFITS } from "./outfits.js";
+import { OUTFITS, RETRO } from "./outfits.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -62,18 +62,19 @@ const SCENE_RATIO = 96 / 64;
 const SPELL_STEPS = 9; // 5 of flight and 4 of hit, as rendered by tibia860.py.
 const SPELL_FRAMES = [...Array(SPELL_STEPS).keys(), null];
 const SLEEP_FRAMES = [...Array(7).keys(), null]; // Effect 33's phases.
-const LOOKTYPES = new Set(OUTFITS.flatMap(([, male, female]) => [String(male), String(female)]));
+const LOOKTYPES = new Set([...OUTFITS, ...RETRO].flatMap(([, male, female]) => [String(male), String(female)]));
 const outfitId = () => {
   const outfit = String(shared("tibia.outfit"));
   return LOOKTYPES.has(outfit) ? outfit : "130";
 };
 
-// The outfit picker: a grid of every outfit for one sex.
-const PICKER_COLUMNS = 6;
+// The outfit picker: a grid of every outfit for one sex, the retro ones last.
+const PICKER_COLUMNS = 8;
 const PICKER_CELL = { w: 72, h: 76 };
 const PICKER_SIZE = {
   width: PICKER_COLUMNS * PICKER_CELL.w + 12,
-  height: Math.ceil(OUTFITS.length / PICKER_COLUMNS) * PICKER_CELL.h + 48,
+  // Header and padding, plus the "Retro" label.
+  height: [OUTFITS, RETRO].reduce((rows, list) => rows + Math.ceil(list.length / PICKER_COLUMNS), 0) * PICKER_CELL.h + 72,
 };
 
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
@@ -204,9 +205,7 @@ export default class Agents extends View {
   outfitMenu(t) {
     const current = outfitId();
     // Opens on the chosen outfit's sex.
-    this.female ??= OUTFITS.some(([, , female]) => String(female) === current);
-    const rows = [];
-    for (let i = 0; i < OUTFITS.length; i += PICKER_COLUMNS) rows.push(OUTFITS.slice(i, i + PICKER_COLUMNS));
+    this.female ??= [...OUTFITS, ...RETRO].some(([, , female]) => String(female) === current);
     const toggle = (label, female) => div()
       .id(`sex-${label}`)
       .px(8)
@@ -242,6 +241,11 @@ export default class Agents extends View {
         .child(div().max_w(PICKER_CELL.w).truncate().text_size(10)
           .text_color(id === current ? t.foreground : t.muted).child(name));
     };
+    const grid = (list) => {
+      const rows = [];
+      for (let i = 0; i < list.length; i += PICKER_COLUMNS) rows.push(list.slice(i, i + PICKER_COLUMNS));
+      return rows.map((row) => h_flex().flex_none().children(row.map(cell)));
+    };
     return v_flex()
       .size_full()
       .p(5)
@@ -255,7 +259,16 @@ export default class Agents extends View {
         .child(div().flex_1().text_size(11).text_color(t.dim).child("Outfit"))
         .child(toggle("Male", false))
         .child(toggle("Female", true)))
-      .children(rows.map((row) => h_flex().flex_none().children(row.map(cell))));
+      .children(grid(OUTFITS))
+      .child(h_flex()
+        .h(24)
+        .flex_none()
+        .px(6)
+        .items_end()
+        .text_size(11)
+        .text_color(t.dim)
+        .child("Retro"))
+      .children(grid(RETRO));
   }
 
   peek(addr) {

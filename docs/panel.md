@@ -43,8 +43,10 @@ Scene sizes and positions are constants at the top of
 ## Outfits
 
 [`outfits.js`](../mods/agents-tibia/outfits.js) lists the picker's entries as
-`[name, male looktype, female looktype]`. The picker and the generator both read
-it. Add or remove a row, regenerate, and install; the popup grows with the rows.
+`[name, male looktype, female looktype]`, in two tables: `OUTFITS`, and `RETRO`
+for the oldschool looks under their own label. The picker and the generator both
+read them. Add or remove a row, regenerate, and install; the popup grows with the
+rows.
 
 ## Changing monsters and spells
 

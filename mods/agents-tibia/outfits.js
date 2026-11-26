@@ -1,5 +1,5 @@
 // The outfits the picker offers, as [name, male looktype, female looktype].
-// tools/tibia860.py reads the looktypes to render each character.
+// tools/tibia860.py reads the looktypes of both tables to render each character.
 export const OUTFITS = [
   ["Citizen", 128, 136],
   ["Hunter", 129, 137],
@@ -25,4 +25,15 @@ export const OUTFITS = [
   ["Newly Wed", 328, 329],
   ["Warmaster", 335, 336],
   ["Wayfarer", 367, 366],
+];
+
+// The oldschool looks of the first seven, shown in their own row.
+export const RETRO = [
+  ["Citizen", 974, 975],
+  ["Hunter", 972, 973],
+  ["Mage", 968, 969],
+  ["Knight", 970, 971],
+  ["Noble", 966, 967],
+  ["Summoner", 964, 965],
+  ["Warrior", 962, 963],
 ];
