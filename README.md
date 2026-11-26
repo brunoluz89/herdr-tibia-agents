@@ -4,7 +4,8 @@ Herdr's Agents panel, with an animated Tibia scene for each agent status.
 
 ![Tibia Agents](preview.png)
 
-Pick your character from 24 outfits, male or female, in the panel header.
+Pick your character in the panel header: 24 outfits and 7 retro ones, male or
+female.
 
 | Status | Scene |
 | --- | --- |
@@ -40,9 +41,10 @@ To go back: `herdr-app do layout.switch '{"name":"main"}'`.
 
 ## Customize
 
-- **Character:** click the character in the panel header and pick one of 24
-  outfits, Citizen through Wayfarer, male or female. The default is the male
-  mage. To offer other outfits, edit `outfits.js` as below.
+- **Character:** click the character in the panel header and pick an outfit,
+  male or female: Citizen through Wayfarer, or the retro (oldschool) looks of
+  the first seven. The default is the male mage. To offer other outfits, edit
+  `outfits.js` as below.
 - **Outfits, monsters, spells, loot:** edit `outfits.js`, `fights.js`, or
   `loot.js` in `mods/agents-tibia/`, regenerate the sprites, and run the
   installer.

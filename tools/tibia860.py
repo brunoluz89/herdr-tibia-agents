@@ -340,7 +340,7 @@ def main():
 
     archive = SpriteArchive(args.source / "Tibia.spr")
     dat = DatIndex(args.dat_index or args.source / "dat-index.json")
-    outfits = load_table(args.outfits, "OUTFITS")
+    outfits = load_table(args.outfits, "OUTFITS") + load_table(args.outfits, "RETRO")
     loot = load_table(args.loot, "LOOT")
     monster_ids = load_table(args.fights, "MONSTERS")
     monsters = list(zip(monster_ids[::2], monster_ids[1::2]))
