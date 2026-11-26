@@ -24,6 +24,13 @@ PALETTE = {
     (0, 255, 0): (180, 99, 55),
     (0, 0, 255): (115, 115, 115),
 }
+# The mask color of each part, by the names the color page (cores-dos-outfits.html) writes.
+PARTS = {"cabeca": (255, 255, 0), "corpo": (255, 0, 0), "pernas": (0, 255, 0), "pes": (0, 0, 255)}
+# Walking steps per character and monster; main.js's WALK_STEPS must match.
+WALK_STEPS = 2
+# The images each outfit gets in sprites/<looktype>/.
+OUTFIT_LABELS = ("idle", "working", "working-2", "fight", *(f"walk-{step}" for step in range(WALK_STEPS)),
+                 "cornered", "need_help", "done")
 TILE = 32
 CANVAS = 64
 SCALE = CANVAS / 48  # The layout budgets below were tuned on a 48 px canvas.
@@ -124,12 +131,50 @@ def frame(archive, group, phase=0, x=SOUTH, y=0, z=0, layer=0):
     return image
 
 
-def colorize(base, mask):
+def parse_palette(colors, base):
+    palette = dict(base)
+    for part, value in colors.items():
+        if part not in PARTS or not re.fullmatch(r"#[0-9a-fA-F]{6}", str(value)):
+            raise ValueError(f"Invalid color {part!r}: {value!r}")
+        palette[PARTS[part]] = tuple(int(value[i:i + 2], 16) for i in (1, 3, 5))
+    return palette
+
+
+def load_colors(path, looktypes):
+    """Palettes from the color page's JSON: {"todos": {...}, "outfits": {"<looktype>": {...}}}."""
+    if not path.is_file():
+        return PALETTE, {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    default = parse_palette(data.get("todos", {}), PALETTE)
+    outfits = {}
+    for outfit, colors in data.get("outfits", {}).items():
+        if not str(outfit).isdigit() or int(outfit) not in looktypes:
+            raise ValueError(f"Unknown outfit {outfit!r} in {path}")
+        outfits[int(outfit)] = parse_palette(colors, default)
+    return default, outfits
+
+
+def walk_phase(group, step):
+    """The animation phase of a walking step: phase 0 stands, the rest walk."""
+    return 1 + step % (group["phases"] - 1) if group["phases"] > 1 else 0
+
+
+def shared_crop(images, box):
+    """Crops images to their common bounds and scales them alike to fit `box`, so they don't jitter."""
+    boxes = [image.getbbox() for image in images if image.getbbox()]
+    bounds = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
+    width, height = bounds[2] - bounds[0], bounds[3] - bounds[1]
+    scale = min(box[0] / width, box[1] / height, 1)
+    size = max(1, round(width * scale)), max(1, round(height * scale))
+    return [image.crop(bounds).resize(size, Image.Resampling.LANCZOS) for image in images]
+
+
+def colorize(base, mask, palette=PALETTE):
     colored = base.copy()
     for y in range(base.height):
         for x in range(base.width):
             red, green, blue, alpha = mask.getpixel((x, y))
-            color = PALETTE.get((red, green, blue))
+            color = palette.get((red, green, blue))
             if alpha and color:
                 r, g, b, opacity = base.getpixel((x, y))
                 shade = (r * 30 + g * 59 + b * 11) // 100
@@ -137,12 +182,16 @@ def colorize(base, mask):
     return colored
 
 
-def outfit_pose(archive, group, phase, direction):
+def archive_frames(archive, group):
+    """An outfit's uncolored frames, read from the client: (phase, direction, addon, layer) -> image."""
+    return lambda phase, direction, addon, layer: frame(archive, group, phase, direction, addon, 0, layer)
+
+
+def outfit_pose(frames, group, phase, direction, palette):
     """One colorized pose: the base outfit plus every addon layer over it."""
     image = None
     for addon in range(group["patternY"]):
-        layer = colorize(frame(archive, group, phase, direction, addon, 0, 0),
-                         frame(archive, group, phase, direction, addon, 0, 1))
+        layer = colorize(frames(phase, direction, addon, 0), frames(phase, direction, addon, 1), palette)
         if image is None:
             image = layer
         else:
@@ -150,13 +199,28 @@ def outfit_pose(archive, group, phase, direction):
     return image
 
 
-def rotated_frame(archive, group, phase, direction):
-    return outfit_pose(archive, group, phase, direction).rotate(
+def rotated_frame(frames, group, phase, direction, palette):
+    return outfit_pose(frames, group, phase, direction, palette).rotate(
         -45, resample=Image.Resampling.BICUBIC, expand=True)
 
 
-def status_images(archive, group):
-    poses = {(phase, direction): rotated_frame(archive, group, phase, direction)
+# What tools/recolor.py rebuilds from: each outfit's uncolored frames, kept beside the client.
+FRAME_KEYS = ("phases", "patternX", "patternY")
+
+
+def save_frame_cache(cache, outfit_id, frames, group):
+    folder = cache / str(outfit_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    for phase in range(group["phases"]):
+        for direction in range(group["patternX"]):
+            for addon in range(group["patternY"]):
+                for layer in (0, 1):
+                    frames(phase, direction, addon, layer).save(folder / f"{phase}-{direction}-{addon}-{layer}.png")
+    (folder / "group.json").write_text(json.dumps({key: group[key] for key in FRAME_KEYS}), encoding="utf-8")
+
+
+def status_images(frames, group, palette):
+    poses = {(phase, direction): rotated_frame(frames, group, phase, direction, palette)
              for phase in range(group["phases"]) for direction in range(group["patternX"])}
     boxes = [sprite.getbbox() for sprite in poses.values() if sprite.getbbox()]
     bounds = (min(box[0] for box in boxes), min(box[1] for box in boxes),
@@ -190,7 +254,20 @@ def status_images(archive, group):
     cornered = Image.new("RGBA", (FIGHT_WIDTH, CANVAS))
     cornered.alpha_composite(victim, (CORNERED_CENTER - victim.width // 2, CANVAS - 2 - victim.height))
     images["cornered"] = cornered
+    # Working: the caster walks east in place. The rail alternates working and working-2.
+    images["working-2"] = place_pose(walk_phase(group, 1), EAST)
+    steps = shared_crop([poses[walk_phase(group, step), EAST] for step in range(WALK_STEPS)], (40, 56))
+    for step, walker in enumerate(steps):
+        images[f"walk-{step}"] = standing_at(walker, 0)
     return images
+
+
+def monster_flee(archive, group):
+    """The monster walking away east, in place where it stood, one image per step."""
+    poses = [frame(archive, group, walk_phase(group, step), EAST).rotate(-45, resample=Image.Resampling.BICUBIC, expand=True)
+             for step in range(WALK_STEPS)]
+    steps = shared_crop(poses, (FIGHT_WIDTH - MONSTER_CENTER << 1, 56))
+    return [standing_at(image, MONSTER_CENTER - image.width // 2) for image in steps]
 
 
 def monster_image(archive, group):
@@ -336,11 +413,15 @@ def main():
                         help="Monster and spell tables of the mod (default: mods/agents-tibia/fights.js)")
     parser.add_argument("--outfits", type=Path, default=MOD / "outfits.js",
                         help="Outfit table of the mod (default: mods/agents-tibia/outfits.js)")
+    parser.add_argument("--colors", type=Path,
+                        help="Outfit colors from the color page (default: <source>/cores.json; absent: the classic colors)")
     args = parser.parse_args()
 
+    outfits = load_table(args.outfits, "OUTFITS") + load_table(args.outfits, "RETRO")
+    # Read first, so a bad color file stops before anything is written.
+    default_palette, outfit_palettes = load_colors(args.colors or args.source / "cores.json", set(outfits))
     archive = SpriteArchive(args.source / "Tibia.spr")
     dat = DatIndex(args.dat_index or args.source / "dat-index.json")
-    outfits = load_table(args.outfits, "OUTFITS") + load_table(args.outfits, "RETRO")
     loot = load_table(args.loot, "LOOT")
     monster_ids = load_table(args.fights, "MONSTERS")
     monsters = list(zip(monster_ids[::2], monster_ids[1::2]))
@@ -383,6 +464,8 @@ def main():
         save_sprite(sprites, Path("monsters") / f"{look}.png",
                     standing_at(image, MONSTER_CENTER - image.width // 2))
         save_sprite(sprites, Path("melee") / f"{look}.png", standing_at(image, MELEE_LEFT))
+        for step, image in enumerate(monster_flee(archive, dat.group("outfits", look))):
+            save_sprite(sprites, Path("monsters") / f"{look}-flee-{step}.png", image)
     save_sprite(sprites, Path("cornered") / "pool.png", pool)
     for missile, frames in spell_images.items():
         for step, image in enumerate(frames):
@@ -427,13 +510,16 @@ def main():
         preview_effect = effect.copy()
 
     for row, outfit_id in enumerate(outfits):
-        images = status_images(archive, dat.group("outfits", outfit_id))
+        group = dat.group("outfits", outfit_id)
+        frames = archive_frames(archive, group)
+        save_frame_cache(args.source / "frames", outfit_id, frames, group)
+        images = status_images(frames, group, outfit_palettes.get(outfit_id, default_palette))
         directory = sprites / str(outfit_id)
         padded_directory = sprites / "padded" / str(outfit_id)
         for stale in list(directory.glob("done-*.png")) + list(padded_directory.glob("done-*.png")):
             stale.unlink()
         draw.text((16, 53 + row * 68), str(outfit_id), fill="white")
-        for label in ("idle", "working", "fight", "cornered", "need_help", "done"):
+        for label in OUTFIT_LABELS:
             save_sprite(sprites, Path(str(outfit_id)) / f"{label}.png", images[label])
         shown = {
             "idle": images["idle"],

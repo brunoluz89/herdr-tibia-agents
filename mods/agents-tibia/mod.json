@@ -4,5 +4,12 @@
   "cloned_from": {
     "name": "agents",
     "version": "0.1.18"
-  }
+  },
+  "palette": [
+    {
+      "title": "Tibia: todos os agentes no automático",
+      "command": "agents-tibia.automatic",
+      "words": "tibia outfit ordem automatico"
+    }
+  ]
 }

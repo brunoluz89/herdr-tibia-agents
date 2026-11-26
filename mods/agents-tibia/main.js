@@ -2,7 +2,7 @@
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
+import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, nextCommand, checking } from "herdr";
 import { LOOT } from "./loot.js";
 import { MONSTERS, SPELLS } from "./fights.js";
 import { OUTFITS, RETRO } from "./outfits.js";
@@ -62,20 +62,37 @@ const SCENE_RATIO = 96 / 64;
 const SPELL_STEPS = 9; // 5 of flight and 4 of hit, as rendered by tibia860.py.
 const SPELL_FRAMES = [...Array(SPELL_STEPS).keys(), null];
 const SLEEP_FRAMES = [...Array(7).keys(), null]; // Effect 33's phases.
+// Working: the character walks and the monster flees, in place, on these steps.
+const WALK_STEPS = 2; // As rendered by tibia860.py (its WALK_STEPS).
+const WALK_FRAMES = [...Array(WALK_STEPS).keys()];
 const LOOKTYPES = new Set([...OUTFITS, ...RETRO].flatMap(([, male, female]) => [String(male), String(female)]));
+// The default order agents get outfits in: Citizen, Mage, Summoner, Warrior, Hunter, Noble, Knight.
+const AGENT_OUTFITS = ["128", "130", "133", "134", "129", "132", "131"];
+// The order set in the picker (shared tibia.agentOrder): any outfits, any number of them.
+const agentOrder = () => {
+  const order = shared("tibia.agentOrder");
+  const valid = Array.isArray(order) && order.length > 0
+    && order.every((o) => LOOKTYPES.has(String(o))) && new Set(order.map(String)).size === order.length;
+  return valid ? order.map(String) : AGENT_OUTFITS;
+};
+// tibia.outfit, when set, goes first.
 const outfitId = () => {
   const outfit = String(shared("tibia.outfit"));
-  return LOOKTYPES.has(outfit) ? outfit : "130";
+  return LOOKTYPES.has(outfit) ? outfit : agentOrder()[0];
 };
-
-// The outfit picker: a grid of every outfit for one sex, the retro ones last.
-const PICKER_COLUMNS = 8;
-const PICKER_CELL = { w: 72, h: 76 };
-const PICKER_SIZE = {
-  width: PICKER_COLUMNS * PICKER_CELL.w + 12,
-  // Header and padding, plus the "Retro" label.
-  height: [OUTFITS, RETRO].reduce((rows, list) => rows + Math.ceil(list.length / PICKER_COLUMNS), 0) * PICKER_CELL.h + 72,
+const outfitPool = () => {
+  const first = outfitId();
+  return [first, ...agentOrder().filter((o) => o !== first)];
 };
+// Outfits picked for one agent in the picker (the tibia-picker mod), by address.
+const chosenOutfits = () => {
+  const chosen = shared("tibia.agentOutfits");
+  if (!chosen || typeof chosen !== "object") return {};
+  return Object.fromEntries(Object.entries(chosen)
+    .filter(([, outfit]) => LOOKTYPES.has(String(outfit)))
+    .map(([address, outfit]) => [address, String(outfit)]));
+};
+const PICKER_SIZE = { width: 880, height: 470 };
 
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 // A sub-agent without a pane isn't in agents(): its raw word, error counting as
@@ -110,13 +127,18 @@ function icon(p, size, color) {
 
 export default class Agents extends View {
   init(_props, cx) {
-    if (props()?.sortMenu || props()?.outfitMenu) return;
+    if (props()?.sortMenu) return;
     this.folded = new Set();
     this.animations = {
       attack: { frames: ATTACK_FRAMES, step: 85, pause: 320, index: 0 },
       spell: { frames: SPELL_FRAMES, step: 120, pause: 600, index: 0 },
       sleep: { frames: SLEEP_FRAMES, step: 220, pause: 660, index: 0 },
+      walk: { frames: WALK_FRAMES, step: 250, pause: 250, index: 0 },
     };
+    // Each agent's outfit, kept across restarts (the agent list is empty right after a start).
+    try { this.outfits = JSON.parse(localStorage.getItem("outfits") ?? "{}"); } catch { this.outfits = {}; }
+    if (!this.outfits || typeof this.outfits !== "object" || Array.isArray(this.outfits)) this.outfits = {};
+    this.live = new Set();
     this.seed = Math.floor(Math.random() * 0x100000000);
     // Each agent's last state and when it changed (ms), kept across restarts.
     try { this.changed = JSON.parse(localStorage.getItem("changed") ?? "{}"); } catch { this.changed = {}; }
@@ -126,6 +148,16 @@ export default class Agents extends View {
     if (!this.pendingPins.length) localStorage.removeItem("pins");
     this.migratingPins = new Set();
     cx.timer.every(30000, (cx) => cx.notify());
+    // "agents-tibia.automatic" (palette: "Tibia: todos os agentes no automático") drops every
+    // outfit picked by hand, so all agents follow the order again.
+    if (checking()) return;
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const command = await nextCommand();
+        if (command === "automatic") setShared("tibia.agentOutfits", {});
+        cx.notify();
+      }
+    });
   }
 
   // Stamps agents whose state changed. Done and idle count as one: looking at a
@@ -134,11 +166,17 @@ export default class Agents extends View {
     let dirty = false;
     for (const a of list) {
       const s = a.status === "done" ? "idle" : a.status;
-      if (this.changed[a.address]?.s === s) continue;
+      const prev = this.changed[a.address];
+      // Finished: idle after working, or done. Herdr turns done into idle once you look,
+      // so an agent you watched finish never reports done; this keeps its loot anyway.
+      const finished = s === "idle" && (a.status === "done" || prev?.s === "working" || Boolean(prev?.finished));
+      if (prev?.s === s && Boolean(prev?.finished) === finished) continue;
       // The monster a working agent was fighting stays: it corners the character
       // or lies dead until the next working stretch.
-      const fight = s === "working" ? now : this.changed[a.address]?.fight;
-      this.changed[a.address] = { s, at: now, fight };
+      const fight = s === "working" ? now : prev?.fight;
+      // Only the flag flipping keeps the time, so the loot stays the same.
+      const at = prev?.s === s ? prev.at : now;
+      this.changed[a.address] = finished ? { s, at, fight, finished } : { s, at, fight };
       dirty = true;
     }
     if (!dirty) return;
@@ -202,73 +240,63 @@ export default class Agents extends View {
         .when(s.id === on, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).flex_none().text_color(t.foreground)))));
   }
 
-  outfitMenu(t) {
-    const current = outfitId();
-    // Opens on the chosen outfit's sex.
-    this.female ??= [...OUTFITS, ...RETRO].some(([, , female]) => String(female) === current);
-    const toggle = (label, female) => div()
-      .id(`sex-${label}`)
-      .px(8)
-      .py(2)
-      .rounded(6)
-      .text_size(11)
-      .text_color(this.female === female ? t.foreground : t.dim)
-      .when(this.female === female, (el) => el.bg(t.hover))
-      .hover((s) => s.text_color(t.foreground))
+  // Each live agent keeps the outfit it was given; a new one takes the first that no live
+  // agent wears. Past seven agents, outfits repeat.
+  assignOutfits(addresses) {
+    const pool = outfitPool();
+    // A new order hands the outfits out again, from the start.
+    const order = pool.join(",");
+    if (this.outfitOrder !== order) {
+      if (localStorage.getItem("outfitOrder") !== order) {
+        this.outfits = {};
+        localStorage.setItem("outfitOrder", order);
+      }
+      this.outfitOrder = order;
+    }
+    // A picked outfit wins, and counts as worn for the others.
+    const chosen = chosenOutfits();
+    const worn = new Set();
+    for (const addr of addresses) {
+      if (chosen[addr]) worn.add(chosen[addr]);
+      else if (pool.includes(this.outfits[addr])) worn.add(this.outfits[addr]);
+    }
+    let dirty = false;
+    addresses.forEach((addr, i) => {
+      if (chosen[addr] || pool.includes(this.outfits[addr])) return;
+      const outfit = pool.find((o) => !worn.has(o)) ?? pool[i % pool.length];
+      this.outfits[addr] = outfit;
+      worn.add(outfit);
+      dirty = true;
+    });
+    // Gone agents' outfits are free again; forget them once there are many.
+    const live = new Set(addresses);
+    const kept = Object.keys(this.outfits);
+    if (kept.length > 64) for (const k of kept) if (!live.has(k)) { delete this.outfits[k]; dirty = true; }
+    if (dirty) localStorage.setItem("outfits", JSON.stringify(this.outfits));
+  }
+
+  outfitOf(a) {
+    if (!this.live.has(a?.address)) return outfitId();
+    return chosenOutfits()[a.address] ?? this.outfits[a.address] ?? outfitId();
+  }
+
+  // The picker for one agent's outfit and that outfit's colors.
+  openPicker(address, name) {
+    openOverlay({ mod: "tibia-picker", kind: "dialog", ...PICKER_SIZE,
+      props: { agent: address, name, outfit: this.outfitOf({ address }) } });
+  }
+
+  // An agent's scene that opens its picker when clicked.
+  pickable(address, name, scene) {
+    return div()
+      .id(`pick-${address}`)
+      .flex_none()
+      .cursor_pointer()
       .on_click((_e, cx) => {
-        this.female = female;
-        cx.notify();
+        cx.stop_propagation();
+        this.openPicker(address, name);
       })
-      .child(label);
-    const cell = ([name, male, female]) => {
-      const id = String(this.female ? female : male);
-      return v_flex()
-        .id(`outfit-${id}`)
-        .w(PICKER_CELL.w)
-        .h(PICKER_CELL.h)
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .gap(2)
-        .rounded(7)
-        .when(id === current, (el) => el.bg(t.hover).border_1().border_color(t.input))
-        .hover((s) => s.bg(t.hover))
-        .on_click(() => {
-          setShared("tibia.outfit", id);
-          closeOverlay(props().overlay);
-        })
-        .child(this.sprite("idle", 52, id))
-        .child(div().max_w(PICKER_CELL.w).truncate().text_size(10)
-          .text_color(id === current ? t.foreground : t.muted).child(name));
-    };
-    const grid = (list) => {
-      const rows = [];
-      for (let i = 0; i < list.length; i += PICKER_COLUMNS) rows.push(list.slice(i, i + PICKER_COLUMNS));
-      return rows.map((row) => h_flex().flex_none().children(row.map(cell)));
-    };
-    return v_flex()
-      .size_full()
-      .p(5)
-      .bg(t.popover)
-      .child(h_flex()
-        .h(30)
-        .flex_none()
-        .px(6)
-        .gap(4)
-        .items_center()
-        .child(div().flex_1().text_size(11).text_color(t.dim).child("Outfit"))
-        .child(toggle("Male", false))
-        .child(toggle("Female", true)))
-      .children(grid(OUTFITS))
-      .child(h_flex()
-        .h(24)
-        .flex_none()
-        .px(6)
-        .items_end()
-        .text_size(11)
-        .text_color(t.dim)
-        .child("Retro"))
-      .children(grid(RETRO));
+      .child(scene);
   }
 
   peek(addr) {
@@ -310,10 +338,12 @@ export default class Agents extends View {
         .when(l === "└" || l === "├", el => el.border_b(1.5).rounded_bl(6))))
       .when(Boolean(pic), el => el.child(div().mr(8).child(pic)))
       .child(div().flex_1().truncate().text_color(on ? t.foreground : t.muted).child(k.name || k.template || k.program?.name || k.address))
-      .when(!compact, (el) => el.child(this.status({ address: k.address, status: st })));
+      .when(!compact, (el) => el.child(this.pickable(k.address, k.name || k.template || k.program?.name || k.address,
+        this.status({ address: k.address, status: st }))));
   }
 
-  sprite(name, size, directory = outfitId(), width = size) {
+  // `directory` is required: an outfit's looktype, or an art folder.
+  sprite(name, size, directory, width = size) {
     const root = "mods/agents-tibia/sprites";
     const file = `${directory}/${name}.png`;
     if (window()?.platform !== "macos") return image(`${root}/${file}`).w(width).h(size).flex_none();
@@ -331,14 +361,14 @@ export default class Agents extends View {
     return animation.frames[animation.index];
   }
 
-  hurt(size) {
+  hurt(size, outfit) {
     const frame = this.frame("attack");
     return div()
       .relative()
       .w(size)
       .h(size)
       .flex_none()
-      .child(this.sprite("need_help", size))
+      .child(this.sprite("need_help", size, outfit))
       .when(frame !== null, el => el.child(div()
         .absolute()
         .top(0)
@@ -359,12 +389,14 @@ export default class Agents extends View {
     return this.pick(MONSTERS, "monster", a, this.changed[a.address]?.fight)[0];
   }
 
+  // Working: the character walks east casting at the monster, which walks away.
   fight(a, size) {
     const [missile] = this.pick(SPELLS, "spell", a);
     const step = this.frame("spell");
+    const walk = this.frame("walk");
     return this.scene(size, [
-      ["fight", outfitId()],
-      [this.monster(a), "monsters"],
+      [`walk-${walk}`, this.outfitOf(a)],
+      [`${this.monster(a)}-flee-${walk}`, "monsters"],
       step !== null && [`${missile}-${step}`, "spells"],
     ]);
   }
@@ -373,7 +405,7 @@ export default class Agents extends View {
     const step = this.frame("attack");
     return this.scene(size, [
       ["pool", "cornered"],
-      ["cornered", outfitId()],
+      ["cornered", this.outfitOf(a)],
       [this.monster(a), "melee"],
       step !== null && [step, "cornered"],
     ]);
@@ -382,17 +414,17 @@ export default class Agents extends View {
   // Done: the monster's corpse with a piece of loot on it.
   victory(a, size) {
     return this.scene(size, [
-      ["fight", outfitId()],
+      ["fight", this.outfitOf(a)],
       [this.monster(a), "corpses"],
       [this.pick(LOOT, "loot", a), "rewards"],
     ]);
   }
 
   // Idle: the character dozes.
-  sleeping(size) {
+  sleeping(a, size) {
     const step = this.frame("sleep");
     return this.scene(size, [
-      ["fight", outfitId()],
+      ["fight", this.outfitOf(a)],
       step !== null && [step, "sleep"],
     ]);
   }
@@ -432,34 +464,40 @@ export default class Agents extends View {
   }
 
   status(a, size = SPRITE_SIZE) {
+    const outfit = this.outfitOf(a);
+    const rail = size === RAIL_SPRITE_SIZE;
     if (a.status === "working") {
-      if (size !== RAIL_SPRITE_SIZE) return this.fight(a, size);
-      // The rail has no room for a fight: the character alone, bobbing.
+      if (!rail) return this.fight(a, size);
+      // The rail has no room for a fight: the character alone, walking and bobbing.
       // Animating the image directly can draw a line beneath it on macOS.
+      const walk = this.frame("walk");
       return div().relative().w(size).h(size).flex_none()
         .child(div().absolute().top(0).left(0).w(size).h(size)
           .loop("top", { from: 0, to: -1, period: 240 })
-          .child(this.sprite("working", size)));
+          .child(this.sprite(walk === 0 ? "working" : "working-2", size, outfit)));
     }
-    if (a.status === "blocked") return size === RAIL_SPRITE_SIZE ? this.hurt(size) : this.cornered(a, size);
-    if (a.status === "idle") return size === RAIL_SPRITE_SIZE ? this.sprite("idle", size) : this.sleeping(size);
-    if (size !== RAIL_SPRITE_SIZE) return this.victory(a, size);
+    if (a.status === "blocked") return rail ? this.hurt(size, outfit) : this.cornered(a, size);
+    // Dozing is for agents that haven't finished anything yet; a finished one keeps its loot.
+    if (a.status === "idle" && !this.changed[a.address]?.finished) return rail ? this.sprite("idle", size, outfit) : this.sleeping(a, size);
+    if (!rail) return this.victory(a, size);
     // The rail: the character facing the loot.
     return div().relative().w(size).h(size).flex_none()
-      .child(this.sprite("done", size))
+      .child(this.sprite("done", size, outfit))
       .child(div().absolute().top(0).left(0).child(this.sprite(String(this.pick(LOOT, "loot", a)), size, "done")));
   }
 
   render(cx) {
     const t = theme();
     if (props()?.sortMenu) return this.sortMenu(t);
-    if (props()?.outfitMenu) return this.outfitMenu(t);
     for (const animation of Object.values(this.animations)) animation.drawn = false;
     const collapsed = narrow();
     const sort = sortOf();
     let list = agents();
     this.listed = new Map(list.map((a) => [a.address, a.status]));
     const all = terminals();
+    // Agents and their sub-agents, each with an outfit of its own.
+    this.live = new Set(list.flatMap((a) => [a.address, ...this.tree(all, a.address).map((s) => s.t.address)]));
+    this.assignOutfits([...this.live]);
     this.migratePins(all);
     const shown = focused()?.agent;
     const now = Date.now();
@@ -578,6 +616,21 @@ export default class Agents extends View {
       // Without a space header above (priority, pinned) the row names its space.
       const full = byPriority || isPinned;
       const name = full ? a.space_name || label(a) : more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
+      // Beside the pin on hover: the agent's character, which opens its outfit picker.
+      const outfitButton = div()
+        .id(`outfit-${a.address}`)
+        .flex_none()
+        .rounded(4)
+        .cursor_pointer()
+        .hover((s) => s.bg(t.hover))
+        .tooltip("Trocar outfit e cores")
+        .on_click((_e, cx) => {
+          cx.stop_propagation();
+          this.hovered = null;
+          this.openPicker(a.address, name);
+          cx.notify();
+        })
+        .child(this.sprite("idle", 20, this.outfitOf(a)));
       return h_flex()
         .id(`ag-${a.address}`)
         .px(8)
@@ -606,9 +659,9 @@ export default class Agents extends View {
           .when(full && Boolean(more), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`\u00b7 ${more}`))))
         .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
         .when(subs.length > 0, el => el.child(fold(a, subs)))
-        .when(this.hovered === a.address, el => el.child(pin))
+        .when(this.hovered === a.address, el => el.child(outfitButton).child(pin))
         .when(this.hovered !== a.address && Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
-        .when(!byPriority, (el) => el.child(this.status(a)));
+        .when(!byPriority, (el) => el.child(this.pickable(a.address, name, this.status(a))));
     };
 
     // Groups in list order: spaces (grouped) or priority sections. Agents of a
@@ -677,28 +730,17 @@ export default class Agents extends View {
             .items_center()
             .justify_between()
             .child(div().text_size(11.5).font_medium().text_color(t.dim).child("Agents"))
-            .child(h_flex()
-              .gap(8)
-              .items_center()
-              .child(
-                div()
-                  .id("ag-outfit")
-                  .rounded(5)
-                  .hover((s) => s.bg(t.hover))
-                  .on_click(() => openOverlay({ mod: "agents-tibia", kind: "popup", ...PICKER_SIZE, props: { outfitMenu: true } }))
-                  .tooltip("Choose outfit")
-                  .child(this.sprite("idle", 30, outfitId())),
-              )
-              .child(
-                div()
-                  .id("ag-sort")
-                  .text_size(11)
-                  .text_color(t.dim)
-                  .hover((s) => s.text_color(t.foreground))
-                  .on_click(() => openOverlay({ mod: "agents-tibia", kind: "popup", width: 200, height: 140, props: { sortMenu: true } }))
-                  .tooltip(`Sort agents: ${sort.label}`)
-                  .child(svg(`mods/workspace-chrome/${sort.icon}.svg`).size(14)),
-              )),
+            // No outfit picker: each agent gets its own outfit, in AGENT_OUTFITS order.
+            .child(
+              div()
+                .id("ag-sort")
+                .text_size(11)
+                .text_color(t.dim)
+                .hover((s) => s.text_color(t.foreground))
+                .on_click(() => openOverlay({ mod: "agents-tibia", kind: "popup", width: 200, height: 140, props: { sortMenu: true } }))
+                .tooltip(`Sort agents: ${sort.label}`)
+                .child(svg(`mods/workspace-chrome/${sort.icon}.svg`).size(14)),
+            ),
         ),
       )
       .when(list.length === 0 && !collapsed, (el) =>

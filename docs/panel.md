@@ -9,8 +9,10 @@ The [generator](../tools/tibia860.py) draws each outfit pose with all of its
 addon layers, not just the base looktype, so the panel character wears the full
 outfit (for 130, the hat and the belt potion). It shades the outfit mask with
 gold hair (`#FFAA00`), an indigo top (`#3F3FCC`), brown trousers (`#B46337`),
-and gray boots (`#737373`). Every outfit gets these colors; they are baked into
-the images. It rotates the frames −45° with bicubic resampling, crops all 12
+and gray boots (`#737373`), unless `cores.json` beside the client files gives
+other colors (`{"todos": {...}, "outfits": {"<looktype>": {...}}}`, parts
+`cabeca`, `corpo`, `pernas`, `pes` as hex); the picker writes it. Colors are
+baked into the images. It rotates the frames −45° with bicubic resampling, crops all 12
 poses in each outfit to shared bounds, and scales them onto a 64×64 PNG canvas
 with Lanczos resampling. Outfits are 64×64 (2×2 tiles) in this
 pack; tiles are placed bottom-right first, following the client. The same script
@@ -24,8 +26,10 @@ combination:
 
 | Layer | Files in `sprites/` | Drawing |
 | --- | --- | --- |
-| Character | `<outfit>/fight.png` | East-facing standing pose, bottom-left, up to 40×56 px. |
-| Monster | `monsters/<looktype>.png` | West-facing, still, bottom-aligned and centered at x=72, up to 48×56 px. |
+| Character | `<outfit>/fight.png` | East-facing standing pose, bottom-left, up to 40×56 px. Done and Idle. |
+| Walking character | `<outfit>/walk-<0–1>.png` | Working: the two walking steps facing east, one shared crop and scale. |
+| Fleeing monster | `monsters/<looktype>-flee-<0–1>.png` | Working: walking away east, centered at x=72, up to 48×56 px. |
+| Monster | `monsters/<looktype>.png` | West-facing, still, bottom-aligned and centered at x=72, up to 48×56 px (no longer drawn). |
 | Spell | `spells/<missile>-<0–8>.png` | Frames 0–4 fly the 30 px missile from x=34 to the monster; 5–8 sample its hit effect. |
 | Cornered character | `<outfit>/cornered.png` | Needs you: south-facing, centered at x=22. |
 | Blood | `cornered/pool.png` | Needs you: splatter under the character, up to 44 px wide and flattened. |
@@ -37,16 +41,30 @@ combination:
 
 Scene sizes and positions are constants at the top of
 [`tools/tibia860.py`](../tools/tibia860.py); frame timing is in `main.js`.
-`SPELL_STEPS` there must match the generator's flight and hit steps, and
-`SLEEP_FRAMES` the phases of the sleep effect.
+`SPELL_STEPS` there must match the generator's flight and hit steps,
+`SLEEP_FRAMES` the phases of the sleep effect, and `WALK_STEPS` the
+generator's `WALK_STEPS`.
+
+The generator also saves each outfit's uncolored frames in `frames/<looktype>/`
+beside the client files. [`tools/recolor.py`](../tools/recolor.py) rebuilds one
+outfit from them with the generator's own functions: `--preview <png>` for the
+picker (about a second), `--apply` or `--reset` to rewrite that outfit's sprites
+(`--sprites`, repeatable) and its entry in `cores.json`. Its output matches the
+full run byte for byte.
 
 ## Outfits
 
 [`outfits.js`](../mods/agents-tibia/outfits.js) lists the picker's entries as
 `[name, male looktype, female looktype]`, in two tables: `OUTFITS`, and `RETRO`
 for the oldschool looks under their own label. The picker and the generator both
-read them. Add or remove a row, regenerate, and install; the popup grows with the
-rows.
+read them; `mods/tibia-picker/outfits.js` is a copy (a mod can't import another
+mod's code) and `install.py` refuses to install when they differ. Add or remove a
+row in both, regenerate, and install.
+
+Which agent wears what: an outfit picked by hand (shared `tibia.agentOutfits`,
+by terminal address) wins; otherwise the first outfit of the order (shared
+`tibia.agentOrder`, else `AGENT_OUTFITS` in `main.js`) that no live agent
+wears. The picker's `DEFAULT_ORDER` repeats `AGENT_OUTFITS`.
 
 ## Changing monsters and spells
 

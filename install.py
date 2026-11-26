@@ -13,10 +13,15 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 from tempfile import NamedTemporaryFile
 
 MOD = "agents-tibia"
 SOURCE = Path(__file__).resolve().parent / "mods" / MOD
+# The per-agent outfit and color picker: its own mod, so rewriting the panel's sprites
+# (which reloads the panel) doesn't reload the open dialog.
+PICKER = "tibia-picker"
+PICKER_SOURCE = SOURCE.parent / PICKER
 
 
 def walk(block):
@@ -58,16 +63,35 @@ def main():
     # Fail on a changed layout before anything is written.
     layout = tibia_layout(shipped)
 
+    # The picker keeps a copy of the outfit table: a mod can't import another mod's code.
+    copy = (PICKER_SOURCE / "outfits.js").read_text(encoding="utf-8").split("\n", 1)[1]
+    if copy != (SOURCE / "outfits.js").read_text(encoding="utf-8"):
+        raise SystemExit(f"{PICKER}/outfits.js differs from {MOD}/outfits.js: copy it over (keep its first line).")
+
     # Checked here, so a broken copy never replaces a working one.
     subprocess.run(["herdr-app", "check", str(SOURCE)], check=True)
+    subprocess.run(["herdr-app", "check", str(PICKER_SOURCE)], check=True)
 
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     # Backups stay outside mods/, where Herdr would load them as mods.
     backup = home / "backups" / f"{MOD}-{stamp}"
     target = home / "mods" / MOD
     layout_file = home / "layouts/tibia.json"
+    picker = home / "mods" / PICKER
     if target.exists():
         shutil.copytree(target, backup / MOD)
+    if picker.exists():
+        shutil.copytree(picker, backup / PICKER)
+    picker.mkdir(parents=True, exist_ok=True)
+    for path in PICKER_SOURCE.iterdir():
+        if path.is_file():
+            shutil.copy2(path, picker / path.name)
+    # The picker runs tools/recolor.py from this repo with this Python.
+    (picker / "config.js").write_text("".join((
+        "// Written by install.py.", chr(10),
+        f"export const REPO = {json.dumps(SOURCE.parent.parent.as_posix())};", chr(10),
+        f"export const PYTHON = {json.dumps(Path(sys.executable).as_posix())};", chr(10),
+    )), encoding="utf-8")
     if layout_file.exists():
         backup.mkdir(parents=True, exist_ok=True)
         shutil.copy2(layout_file, backup / layout_file.name)

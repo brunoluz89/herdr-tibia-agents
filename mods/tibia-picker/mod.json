@@ -1,0 +1,6 @@
+{
+  "place": "none",
+  "title": "Tibia outfit",
+  "overlay": { "width": 880, "height": 470 },
+  "palette": [{ "title": "Tibia: outfits e cores", "command": "mod.open", "args": { "name": "tibia-picker" }, "words": "tibia outfit cores agentes" }]
+}
