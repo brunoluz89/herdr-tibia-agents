@@ -41,12 +41,22 @@ replaced by this mod. Colors and type come from the active theme.
   is for agents that have not finished anything yet.
 
 - The monster is picked when an agent starts working and stays through Needs you
-  and Done. The spell is picked per working stretch, the loot per completion.
+  and Done. The spell is picked per working stretch (a paladin's missile per
+  shot), the loot per completion.
   Picks are random, independent, and stable across redraws; a panel reload picks
   anew.
+- Vocations, one per outfit (shared `tibia.outfitVocations`, by looktype): an
+  agent attacks with the vocation of the outfit it wears, else mixed. Mixed casts the 8 spells every agent cast before vocations (ice, holy burst,
+  fire, energy, energy ball, sudden death, earth, small holy). Sorcerers cast
+  fire, energy, energy ball or sudden death; druids ice, small ice, earth or
+  poison; paladins shoot one of 24 arrows, bolts, spears, stars, knives or holy
+  missiles each shot, and their first hit leaves blood under the monster.
+  Knights don't walk in place: the monster stands still and the knight walks up,
+  strikes it (blood spurts) and walks back. The palette's "automatic" command
+  and the picker's "Automático" change which outfit an agent wears, not the
+  outfits' vocations.
 - 8 monsters (dragon, demon, cyclops, orc, giant spider, hydra, rotworm,
-  skeleton), 8 spells (ice, holy burst, fire, energy, energy ball, sudden death,
-  earth, small holy), and 10 loot items (gold coins, violet gem, health potion,
+  skeleton) and 10 loot items (gold coins, violet gem, health potion,
   banana, fire sword, golden helmet, mastermind shield, backpack of holding,
   frozen starlight, thunder hammer).
 - Agents showing the same status animate in step. Burst, spell, and sleep
@@ -100,7 +110,9 @@ replaced by this mod. Colors and type come from the active theme.
   the block with id `agents`. `tibia-picker` (`main.js`, `outfits.js`, a copy of
   the panel's, and `config.js`, written by `install.py` with the repo's path and
   Python) is the picker dialog, opened with props `{ agent, name, outfit }`, or
-  none from the palette (`mod.open`).
+  none from the palette (`mod.open`). It sets the vocation of the outfit shown
+  (any number of outfits before saving), kept when "Salvar alterações" (or
+  "Vestir este agente") is clicked; "Cancelar" drops them.
 - Props of `agents-tibia`: `{ sortMenu: true }` renders the sort popup; no props
   renders the panel.
 - `herdr` functions: `agents`, `terminals`, `panes`, `focused`, `spaces`, `run`,
@@ -109,7 +121,8 @@ replaced by this mod. Colors and type come from the active theme.
   picker also `exec`, `readTextFile`, `home`, `appHome`.
 - Commands: `pane.focus`, `terminal.peek`, `terminal.pin`, `layout.resize`.
 - State: shared `tibia.agentOutfits` (outfits picked by hand, by terminal
-  address), `tibia.agentOrder` (looktypes), `tibia.outfit` (optional: put first
+  address), `tibia.outfitVocations` (each outfit's vocation, by looktype),
+  `tibia.agentOrder` (looktypes), `tibia.outfit` (optional: put first
   in the order), `agents.sort`, `sidebar.width`, `sidebar.collapsed`;
   `localStorage` `changed` (each agent's state, time, fight, and whether it
   finished), `outfits` and `outfitOrder` (the automatic handout), and `pins`.
@@ -123,7 +136,10 @@ replaced by this mod. Colors and type come from the active theme.
 - Art: PNGs made by `tools/tibia860.py` from the extended Tibia 8.6 client. Each
   scene is a stack of full-size transparent layers: character
   (`<outfit>/walk-<step>.png`, `<outfit>/fight.png` or `<outfit>/cornered.png`),
-  then `monsters/<looktype>-flee-<step>.png` and `spells/`, or `cornered/` and
+  then `monsters/<looktype>-flee-<step>.png` and `spells/` (and `blood/` for
+  paladins); for knights `blood/pool.png`, `monsters/<looktype>.png`, the
+  character (`<outfit>/step1.png`, `step2.png` or `fight.png`, shifted right)
+  and `blood/<step>.png`; or `cornered/` and
   `melee/`, or `corpses/` and `rewards/`, or `sleep/`. The rail walks on
   `<outfit>/working.png` and `working-2.png`.
 - Outfits are shaded gold hair `#FFAA00`, indigo top `#3F3FCC`, brown trousers

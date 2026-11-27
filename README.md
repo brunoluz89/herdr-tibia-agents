@@ -12,7 +12,7 @@ female) and to recolor that outfit.
 | --- | --- |
 | Needs you | The monster closes in; blood on the character and the floor. |
 | Done | The monster's corpse with a piece of loot on it, also when you watched the agent finish. |
-| Working | The character walks, casting a spell at a monster that walks away. |
+| Working | The character walks, shooting at a monster that walks away; a knight walks up to the monster and strikes it. |
 | Idle | The character dozes, until the agent finishes its first job. |
 
 The art is CipSoft's, taken from Tibia client files. Keep this repository
@@ -61,7 +61,7 @@ To go back: `herdr-app do layout.switch '{"name":"main"}'`.
   agent) and "Tibia: todos os agentes no automático". Recoloring needs the
   client files below: the picker runs `tools/recolor.py`.
 - **Wording:** the picker's labels are in Portuguese.
-- **Outfits, monsters, spells, loot:** edit `outfits.js`, `fights.js`, or
+- **Outfits, monsters, attacks, loot:** edit `outfits.js`, `fights.js`, or
   `loot.js` in `mods/agents-tibia/`, regenerate the sprites, and run the
   installer.
 

@@ -1,6 +1,7 @@
 // The per-agent outfit picker of the Tibia Agents panel, opened as a dialog by agents-tibia
 // with props { agent, name, outfit }. Picks an outfit for that one agent, and the outfit's
 // colors, with a preview. Colors belong to the outfit (every agent wearing it shares them).
+// Also sets each outfit's vocation: how every agent wearing that outfit attacks.
 // Python (tools/recolor.py in the source repo) renders the preview and the outfit's sprites;
 // it lives in its own mod so rewriting agents-tibia's sprites doesn't reload this dialog.
 
@@ -58,6 +59,12 @@ const nameOf = (id) => {
   return `${name}${RETRO_IDS.has(id) ? " retrô" : ""}${FEMALE_IDS.has(id) ? " (F)" : ""}`;
 };
 const sameColors = (a, b) => PARTS.every(([part]) => a?.[part] === b?.[part]);
+// The vocations agents-tibia knows (its VOCATIONS), one per outfit in shared
+// `tibia.outfitVocations` {looktype: id}. An outfit without one is "Mista": the
+// spells every agent cast before vocations.
+const VOCATIONS = [["sorcerer", "Sorcerer"], ["druid", "Druid"], ["paladin", "Paladin"], ["knight", "Knight"]];
+const VOCATION_IDS = new Set(VOCATIONS.map(([id]) => id));
+const vocationLabel = (id) => VOCATIONS.find(([v]) => v === id)?.[1] ?? "Mista";
 
 export default class TibiaPicker extends View {
   init(_props, cx) {
@@ -66,6 +73,9 @@ export default class TibiaPicker extends View {
     this.name = p.name || p.agent || "";
     this.outfit = String(p.outfit ?? "128");
     this.wornAtOpen = this.outfit;
+    // Vocations picked here, by looktype (null: Mista), kept until "Salvar alterações"
+    // or "Vestir este agente". Several outfits can be changed before saving.
+    this.pendingVocations = {};
     this.female = [...OUTFITS, ...RETRO].some(([, , female]) => String(female) === this.outfit);
     this.part = "cabeca";
     // "outfit": this agent's outfit and its colors; "order": the agents' automatic order.
@@ -159,6 +169,37 @@ export default class TibiaPicker extends View {
     cx.notify();
   }
 
+  // The saved vocation of each outfit, by looktype; null is Mista.
+  savedVocation(outfit) {
+    const saved = shared("tibia.outfitVocations");
+    const id = saved && typeof saved === "object" ? saved[outfit] : null;
+    return VOCATION_IDS.has(id) ? id : null;
+  }
+
+  // An outfit's vocation as shown: picked here, else saved.
+  vocationOf(outfit) {
+    return outfit in this.pendingVocations ? this.pendingVocations[outfit] : this.savedVocation(outfit);
+  }
+
+  // Outfits whose vocation was picked here and differs from the saved one.
+  changedVocations() {
+    return Object.keys(this.pendingVocations).filter((o) => this.pendingVocations[o] !== this.savedVocation(o));
+  }
+
+  saveVocations() {
+    const changed = this.changedVocations();
+    if (changed.length) {
+      const saved = shared("tibia.outfitVocations");
+      const next = saved && typeof saved === "object" ? { ...saved } : {};
+      for (const o of changed) {
+        if (this.pendingVocations[o]) next[o] = this.pendingVocations[o];
+        else delete next[o];
+      }
+      setShared("tibia.outfitVocations", next);
+    }
+    this.pendingVocations = {};
+  }
+
   setAgentOutfit(outfit) {
     const chosen = { ...(shared("tibia.agentOutfits") ?? {}) };
     if (outfit) chosen[this.agent] = outfit;
@@ -176,10 +217,12 @@ export default class TibiaPicker extends View {
     closeOverlay(props()?.overlay);
   }
 
-  // Saves the outfit's colors when they changed; `dress` also puts the outfit on the agent.
-  // Saving colors alone never changes which outfit the agent wears.
+  // Saves the outfits' vocations and this outfit's colors when they changed; `dress` also
+  // puts the outfit on the agent. Saving alone never changes which outfit the agent wears.
   save(cx, dress) {
     if (this.busy) return;
+    // First, so a failed color render doesn't lose them.
+    this.saveVocations();
     const shared_ = { ...CLASSIC, ...this.cores.todos };
     const own = Boolean(this.cores.outfits?.[this.outfit]);
     let mode = null;
@@ -317,7 +360,23 @@ export default class TibiaPicker extends View {
         .on_click((_e, cx) => this.chooseColor(hex, cx)))));
     }
     const chosen = this.agent ? (shared("tibia.agentOutfits") ?? {})[this.agent] : null;
+    const vocation = this.vocationOf(this.outfit);
+    const vocationChoice = (id, label) => div()
+      .id(`vocation-${id ?? "auto"}`)
+      .px(8)
+      .py(2)
+      .rounded(6)
+      .text_size(11)
+      .text_color(vocation === id ? t.foreground : t.dim)
+      .when(vocation === id, (el) => el.bg(t.hover))
+      .hover((s) => s.text_color(t.foreground))
+      .on_click((_e, cx) => {
+        this.pendingVocations = { ...this.pendingVocations, [this.outfit]: id };
+        cx.notify();
+      })
+      .child(label);
     const name = nameOf(this.outfit);
+    const unsaved = this.changedVocations().length;
     const small = (id, label, onClick, enabled = true) => div()
       .id(id)
       .w(20)
@@ -351,7 +410,7 @@ export default class TibiaPicker extends View {
         .on_click((_e, cx) => { this.selected = i; cx.notify(); })
         .child(div().w(30).flex_none().text_size(11).text_color(t.accent).child(`${i + 1}º`))
         .child(image(`${SPRITES}/${id}/idle.png`).w(26).h(26).flex_none())
-        .child(div().flex_1().min_w(0).truncate().text_size(12).child(`${nameOf(id)} · ${id}`))
+        .child(div().flex_1().min_w(0).truncate().text_size(12).child(`${nameOf(id)} · ${id} · ${vocationLabel(this.vocationOf(id))}`))
         .child(small(`up-${i}`, "↑", (_e, cx) => this.moveInOrder(i, -1, cx), i > 0))
         .child(small(`down-${i}`, "↓", (_e, cx) => this.moveInOrder(i, 1, cx), i < this.order.length - 1))
         .child(small(`remove-${i}`, "✕", (_e, cx) => this.removeFromOrder(i, cx), this.order.length > 1))));
@@ -394,6 +453,14 @@ export default class TibiaPicker extends View {
           .min_w(0)
           .gap(9)
           .child(h_flex()
+            .h(26)
+            .flex_none()
+            .gap(4)
+            .items_center()
+            .child(div().flex_1().text_size(11).text_color(t.dim).child("Vocação"))
+            .child(vocationChoice(null, "Mista"))
+            .children(VOCATIONS.map(([id, label]) => vocationChoice(id, label))))
+          .child(h_flex()
             .h(136)
             .flex_none()
             .rounded(8)
@@ -403,7 +470,7 @@ export default class TibiaPicker extends View {
             .when(Boolean(this.preview), (el) => el.child(image(this.preview).w(256).h(128).flex_none()))
             .when(!this.preview, (el) => el.child(div().text_size(11).text_color(t.dim).child("Gerando a prévia…"))))
           .child(div().text_size(11).text_color(t.dim)
-            .child(`${name} (${this.outfit})${this.rendering ? " · atualizando…" : ""}`))
+            .child(`${name} (${this.outfit}) · ${vocationLabel(vocation)}${this.rendering ? " · atualizando…" : ""}`))
           .child(h_flex().gap(6).flex_none().children(PARTS.map(([part, label]) => h_flex()
             .id(`part-${part}`)
             .flex_1()
@@ -421,7 +488,7 @@ export default class TibiaPicker extends View {
             .child(div().text_size(11).truncate().child(label)))))
           .child(v_flex().gap(2).flex_none().children(swatches))
           .child(div().text_size(10.5).text_color(t.dim)
-            .child("As cores valem para este outfit em todos os agentes que o usarem.")))))
+            .child("As cores e a vocação valem para este outfit em todos os agentes que o usarem.")))))
       .when(ordering, (el) => el.child(h_flex()
         .h(30)
         .flex_none()
@@ -444,8 +511,13 @@ export default class TibiaPicker extends View {
         .flex_none()
         .gap(8)
         .items_center()
-        .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(this.message))
+        .child(div().flex_1().min_w(0).truncate().text_size(11)
+          .text_color(!this.message && unsaved ? t.accent : t.dim)
+          .child(this.message || (unsaved === 1 ? "Vocação alterada: clique em Salvar alterações."
+            : unsaved ? `${unsaved} vocações alteradas: clique em Salvar alterações.` : "")))
         .when(Boolean(this.agent && chosen), (el) => el.child(button("auto", "Automático", (_e, cx) => {
+          // The outfit goes automatic; a vocation picked meanwhile is saved, not lost.
+          this.saveVocations();
           this.setAgentOutfit(null);
           this.dismiss();
         })))
@@ -455,7 +527,7 @@ export default class TibiaPicker extends View {
           cx.notify();
         }))
         .child(button("cancel", "Cancelar", () => this.dismiss()))
-        .child(button("save", this.busy ? "Aplicando…" : "Salvar cores", (_e, cx) => this.save(cx, false), !this.wearing()))
+        .child(button("save", this.busy ? "Aplicando…" : "Salvar alterações", (_e, cx) => this.save(cx, false), !this.wearing()))
         .when(this.wearing(), (el) => el.child(button("dress", "Vestir este agente", (_e, cx) => this.save(cx, true), true)))));
   }
 }

@@ -4,7 +4,7 @@ import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, nextCommand, checking } from "herdr";
 import { LOOT } from "./loot.js";
-import { MONSTERS, SPELLS } from "./fights.js";
+import { MONSTERS, SPELLS, SORCERER, DRUID, PALADIN } from "./fights.js";
 import { OUTFITS, RETRO } from "./outfits.js";
 
 function find(node, id) {
@@ -59,8 +59,19 @@ const EDGE_PADDING = 3; // Matches the transparent PNG border from tibia860.py.
 const ATTACK_FRAMES = [2663, 2664, 2665, 2666, 2667, 2668, null];
 // The panel draws wide scenes; the rail, square sprites.
 const SCENE_RATIO = 96 / 64;
-const SPELL_STEPS = 9; // 5 of flight and 4 of hit, as rendered by tibia860.py.
+const FLIGHT_STEPS = 5;
+const SPELL_STEPS = FLIGHT_STEPS + 4; // Flight, then hit, as rendered by tibia860.py.
 const SPELL_FRAMES = [...Array(SPELL_STEPS).keys(), null];
+// A knight's attack: walk up, strike, walk back. Each frame has how far right of
+// its spot the character is, in scene pixels, then the walking pose or the step
+// of the blood spurting from the monster. null is the pause, standing at the start.
+const KNIGHT_START = 6;
+const STEP_MARGIN = 6; // Empty left of the walking frames (step1, step2), as in tibia860.py.
+const STRIKE_FRAMES = [
+  { x: 11, pose: 1 }, { x: 16, pose: 2 }, { x: 21, pose: 1 }, { x: 27, pose: 2 },
+  { x: 27, hit: 0 }, { x: 27, hit: 1 }, { x: 27, hit: 2 }, { x: 27, hit: 3 },
+  { x: 22, pose: 1 }, { x: 17, pose: 2 }, { x: 12, pose: 1 }, null,
+];
 const SLEEP_FRAMES = [...Array(7).keys(), null]; // Effect 33's phases.
 // Working: the character walks and the monster flees, in place, on these steps.
 const WALK_STEPS = 2; // As rendered by tibia860.py (its WALK_STEPS).
@@ -92,7 +103,18 @@ const chosenOutfits = () => {
     .filter(([, outfit]) => LOOKTYPES.has(String(outfit)))
     .map(([address, outfit]) => [address, String(outfit)]));
 };
-const PICKER_SIZE = { width: 880, height: 470 };
+// Vocations: how a working agent attacks. Each outfit has its own, set in the picker
+// (shared tibia.outfitVocations, by looktype); an outfit without one is "mixed", the
+// spells every agent cast before vocations.
+const VOCATIONS = [
+  { id: "mixed", attacks: SPELLS },
+  { id: "sorcerer", attacks: SORCERER },
+  { id: "druid", attacks: DRUID },
+  { id: "paladin", attacks: PALADIN },
+  { id: "knight" }, // Strikes up close: no missiles.
+];
+const vocationById = (id) => VOCATIONS.find((v) => v.id === id);
+const PICKER_SIZE = { width: 880, height: 506 };
 
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 // A sub-agent without a pane isn't in agents(): its raw word, error counting as
@@ -131,7 +153,8 @@ export default class Agents extends View {
     this.folded = new Set();
     this.animations = {
       attack: { frames: ATTACK_FRAMES, step: 85, pause: 320, index: 0 },
-      spell: { frames: SPELL_FRAMES, step: 120, pause: 600, index: 0 },
+      spell: { frames: SPELL_FRAMES, step: 120, pause: 600, index: 0, cycle: 0 },
+      strike: { frames: STRIKE_FRAMES, step: 120, pause: 600, index: 0 },
       sleep: { frames: SLEEP_FRAMES, step: 220, pause: 660, index: 0 },
       walk: { frames: WALK_FRAMES, step: 250, pause: 250, index: 0 },
     };
@@ -140,6 +163,7 @@ export default class Agents extends View {
     if (!this.outfits || typeof this.outfits !== "object" || Array.isArray(this.outfits)) this.outfits = {};
     this.live = new Set();
     this.seed = Math.floor(Math.random() * 0x100000000);
+    this.bled = new Set(); // Working stretches in which a paladin has hit.
     // Each agent's last state and when it changed (ms), kept across restarts.
     try { this.changed = JSON.parse(localStorage.getItem("changed") ?? "{}"); } catch { this.changed = {}; }
     if (!this.changed || typeof this.changed !== "object" || Array.isArray(this.changed)) this.changed = {};
@@ -280,6 +304,12 @@ export default class Agents extends View {
     return chosenOutfits()[a.address] ?? this.outfits[a.address] ?? outfitId();
   }
 
+  // The agent's vocation: the one of the outfit it wears.
+  vocationOf(a) {
+    const chosen = shared("tibia.outfitVocations");
+    return vocationById(chosen && typeof chosen === "object" ? chosen[this.outfitOf(a)] : null) ?? VOCATIONS[0];
+  }
+
   // The picker for one agent's outfit and that outfit's colors.
   openPicker(address, name) {
     openOverlay({ mod: "tibia-picker", kind: "dialog", ...PICKER_SIZE,
@@ -376,11 +406,13 @@ export default class Agents extends View {
         .child(this.sprite(frame, size, "attack"))));
   }
 
-  // A wide scene: full-size images stacked in order, each [name, directory].
+  // A wide scene: full-size images stacked in order, each [name, directory] and,
+  // to shift it right, a number of scene pixels.
   scene(size, layers) {
     const width = size * SCENE_RATIO;
     return div().relative().w(width).h(size).flex_none()
-      .children(layers.filter(Boolean).map(([name, directory]) => div().absolute().top(0).left(0)
+      .children(layers.filter(Boolean).map(([name, directory, x = 0]) => div().absolute().top(0)
+        .left(x * size / SPRITE_SIZE)
         .child(this.sprite(name, size, directory, width))));
   }
 
@@ -389,15 +421,45 @@ export default class Agents extends View {
     return this.pick(MONSTERS, "monster", a, this.changed[a.address]?.fight)[0];
   }
 
-  // Working: the character walks east casting at the monster, which walks away.
+  // Working: the character walks east shooting at the monster, which walks away.
+  // A knight instead walks up to it and strikes.
   fight(a, size) {
-    const [missile] = this.pick(SPELLS, "spell", a);
+    const { id, attacks } = this.vocationOf(a);
+    if (id === "knight") return this.melee(a, size);
     const step = this.frame("spell");
     const walk = this.frame("walk");
+    // A paladin picks anew for every shot. Each hit draws blood, and the first
+    // leaves a pool for the rest of the working stretch.
+    const paladin = id === "paladin";
+    const stretch = this.since(a);
+    const [missile] = this.pick(attacks, "spell", a, paladin ? `${stretch}:${this.animations.spell.cycle}` : stretch);
+    const hit = paladin && step >= FLIGHT_STEPS; // null, the pause, compares as 0.
+    const key = `${a.address}:${stretch}`;
+    if (hit) {
+      if (this.bled.size > 256) this.bled.clear();
+      this.bled.add(key);
+    }
     return this.scene(size, [
+      paladin && this.bled.has(key) && ["pool", "blood"],
       [`walk-${walk}`, this.outfitOf(a)],
       [`${this.monster(a)}-flee-${walk}`, "monsters"],
+      hit && [step - FLIGHT_STEPS, "blood"],
       step !== null && [`${missile}-${step}`, "spells"],
+    ]);
+  }
+
+  // A knight walks up to the monster, bleeding on the floor, and strikes it,
+  // drawn in front of it.
+  melee(a, size) {
+    const frame = this.frame("strike");
+    const outfit = this.outfitOf(a);
+    return this.scene(size, [
+      ["pool", "blood"],
+      [this.monster(a), "monsters"],
+      frame?.pose
+        ? [`step${frame.pose}`, outfit, frame.x - STEP_MARGIN]
+        : ["fight", outfit, frame?.x ?? KNIGHT_START],
+      frame?.hit !== undefined && [frame.hit, "blood"],
     ]);
   }
 
@@ -446,6 +508,7 @@ export default class Agents extends View {
           return;
         }
         animation.index = (animation.index + 1) % animation.frames.length;
+        if (animation.index === 0 && animation.cycle !== undefined) animation.cycle += 1;
         cx.notify();
       });
     }
@@ -730,7 +793,8 @@ export default class Agents extends View {
             .items_center()
             .justify_between()
             .child(div().text_size(11.5).font_medium().text_color(t.dim).child("Agents"))
-            // No outfit picker: each agent gets its own outfit, in AGENT_OUTFITS order.
+            // No outfit picker here: each agent gets its own outfit, in AGENT_OUTFITS order,
+            // and the outfit's colors and vocation are set in the tibia-picker dialog.
             .child(
               div()
                 .id("ag-sort")

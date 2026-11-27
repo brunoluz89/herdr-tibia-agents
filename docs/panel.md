@@ -29,8 +29,10 @@ combination:
 | Character | `<outfit>/fight.png` | East-facing standing pose, bottom-left, up to 40×56 px. Done and Idle. |
 | Walking character | `<outfit>/walk-<0–1>.png` | Working: the two walking steps facing east, one shared crop and scale. |
 | Fleeing monster | `monsters/<looktype>-flee-<0–1>.png` | Working: walking away east, centered at x=72, up to 48×56 px. |
-| Monster | `monsters/<looktype>.png` | West-facing, still, bottom-aligned and centered at x=72, up to 48×56 px (no longer drawn). |
-| Spell | `spells/<missile>-<0–8>.png` | Frames 0–4 fly the 30 px missile from x=34 to the monster; 5–8 sample its hit effect. |
+| Monster | `monsters/<looktype>.png` | West-facing, still, bottom-aligned and centered at x=72, up to 48×56 px. Working, for knights. |
+| Spell | `spells/<missile>-<0–8>.png` | Frames 0–4 fly the 30 px missile from x=34 to the monster (spears leveled on the path); 5–8 sample its hit effect. |
+| Knight's steps | `<outfit>/step<1–2>.png` | Working, knights: the walking poses facing east, at the `fight.png` scale and registered with it, 6 px (`STEP_MARGIN`) right of it; `main.js` shifts them back. |
+| Monster's blood | `blood/pool.png`, `blood/<0–3>.png` | Working, knights and paladins: splatter under the monster, and the hit spurting on it, 42 px. |
 | Cornered character | `<outfit>/cornered.png` | Needs you: south-facing, centered at x=22. |
 | Blood | `cornered/pool.png` | Needs you: splatter under the character, up to 44 px wide and flattened. |
 | Close monster | `melee/<looktype>.png` | Needs you: the same monster with its left edge at x=29. |
@@ -41,7 +43,9 @@ combination:
 
 Scene sizes and positions are constants at the top of
 [`tools/tibia860.py`](../tools/tibia860.py); frame timing is in `main.js`.
-`SPELL_STEPS` there must match the generator's flight and hit steps,
+`SPELL_STEPS` (and `FLIGHT_STEPS`) there must match the generator's flight and
+hit steps, `STEP_MARGIN` the generator's, `STRIKE_FRAMES` set the knight's
+path,
 `SLEEP_FRAMES` the phases of the sleep effect, and `WALK_STEPS` the
 generator's `WALK_STEPS`.
 
@@ -66,11 +70,21 @@ by terminal address) wins; otherwise the first outfit of the order (shared
 `tibia.agentOrder`, else `AGENT_OUTFITS` in `main.js`) that no live agent
 wears. The picker's `DEFAULT_ORDER` repeats `AGENT_OUTFITS`.
 
-## Changing monsters and spells
+## Vocations
+
+An agent's vocation is the one of the outfit it wears (shared
+`tibia.outfitVocations`, by looktype), else `mixed`, the spells of before
+vocations. In the picker, the "Vocação" row sets it for the outfit
+shown; changes to several outfits are kept until "Salvar alterações" or
+"Vestir este agente". The order tab lists each outfit's vocation. The picker's
+`VOCATIONS` repeats the panel's ids.
+
+## Changing monsters and attacks
 
 In [`fights.js`](../mods/agents-tibia/fights.js), `MONSTERS` lists monsters as
-`[looktype, corpse item id]` pairs, and each `SPELLS` entry is a
-`[missile id, hit effect id]` pair. A monster's corpse item ID is the
+`[looktype, corpse item id]` pairs, and each `SORCERER`, `DRUID` and `PALADIN`
+entry is a `[missile id, hit effect id]` pair; a missile id appears once across
+the three. `SPELLS`, the mixed default, picks missiles from them. A monster's corpse item ID is the
 `monster.corpse` value in its server definition (for example, TFS
 `data/monsters/`). [`loot.js`](../mods/agents-tibia/loot.js) lists the loot.
 After editing either file, regenerate and install, so the panel never names an

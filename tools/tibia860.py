@@ -30,7 +30,7 @@ PARTS = {"cabeca": (255, 255, 0), "corpo": (255, 0, 0), "pernas": (0, 255, 0), "
 WALK_STEPS = 2
 # The images each outfit gets in sprites/<looktype>/.
 OUTFIT_LABELS = ("idle", "working", "working-2", "fight", *(f"walk-{step}" for step in range(WALK_STEPS)),
-                 "cornered", "need_help", "done")
+                 "step1", "step2", "cornered", "need_help", "done")
 TILE = 32
 CANVAS = 64
 SCALE = CANVAS / 48  # The layout budgets below were tuned on a 48 px canvas.
@@ -39,8 +39,9 @@ SOUTH = 2
 EAST = 1
 WEST = 3
 # The panel scenes share one wide canvas. Working: the character bottom-left
-# casts at a monster bottom-right. Needs you: the monster has closed in. Done:
-# the loot lies on the monster's corpse. Idle: the character dozes.
+# shoots at a monster bottom-right, or, as a knight, walks up and strikes it.
+# Needs you: the monster has closed in. Done: the loot lies on the monster's
+# corpse. Idle: the character dozes.
 FIGHT_WIDTH = 96
 MONSTER_CENTER = 72
 MISSILE_START = 34
@@ -48,13 +49,17 @@ SPELL_HEIGHT = 34  # y of the missile path and of the hit effect.
 MISSILE_SIZE = 30
 EFFECT_TILE = 34
 FLIGHT_STEPS = 5
+# Missiles whose art sits low in its tile, centered on the flight path instead.
+LOW_MISSILES = (1, 17, 18, 21, 28)  # The spears.
 HIT_STEPS = (0.2, 0.4, 0.6, 0.8)  # Points of the hit effect shown; main.js counts all steps.
+STEP_MARGIN = 6  # Room left of a knight's walking frame (step1, step2); main.js shifts it back.
 CORNERED_CENTER = 22  # x of the cornered character, its blood and its burst.
 MELEE_LEFT = 29  # Left edge of the monster beside the cornered character.
 POOL_ITEM = 2889  # The splatter shape of a fluid on the floor.
 BLOOD = (2, 0)  # Its dat pattern for blood.
 POOL_SIZE = 44
 BURST_SIZE = 40
+BLOOD_SIZE = 42  # The blood spurting from a monster hit by a knight or paladin.
 REWARD_SIZES = (22, 28)  # Smallest and largest loot on a corpse, by its longer side.
 SLEEP_EFFECT = 33  # The Zzz of a sleeping character.
 SLEEP_SIZE = (26, 28)  # Room for the Zzz, beside the character's head.
@@ -249,6 +254,17 @@ def status_images(frames, group, palette):
     fight = Image.new("RGBA", (FIGHT_WIDTH, CANVAS))
     fight.alpha_composite(caster, (0, CANVAS - caster.height))
     images["fight"] = fight
+    # A knight's two walking frames facing east, at the fight pose's size and
+    # registered with it, STEP_MARGIN right of it, so only what moves changes.
+    left, top, _, bottom = facing_reward.getbbox()
+    shrink = caster.height / (bottom - top)
+    origin = STEP_MARGIN - round(left * shrink), CANVAS - round(bottom * shrink)
+    for name, step in (("step1", 0), ("step2", 1)):
+        walker = place_pose(walk_phase(group, step), EAST)
+        walker = walker.resize((round(CANVAS * shrink), round(CANVAS * shrink)), Image.Resampling.LANCZOS)
+        canvas = Image.new("RGBA", (FIGHT_WIDTH, CANVAS))
+        canvas.paste(walker, origin)  # Onto an empty canvas: a plain copy, even past its edge.
+        images[name] = canvas
     victim = standing.crop(standing.getbbox())
     victim.thumbnail((40, 56), Image.Resampling.LANCZOS)
     cornered = Image.new("RGBA", (FIGHT_WIDTH, CANVAS))
@@ -285,14 +301,14 @@ def standing_at(image, left):
     return canvas
 
 
-def blood_pool(archive, group):
-    """Blood on the floor under the cornered character."""
+def blood_pool(archive, group, center):
+    """Blood on the floor under whoever stands at x `center`."""
     image = frame(archive, group, 0, *BLOOD)
     image = image.crop(image.getbbox())
     image.thumbnail((POOL_SIZE, POOL_SIZE), Image.Resampling.LANCZOS)
     # Flattened to lie on the floor.
     image = image.resize((image.width, round(image.height * 0.7)), Image.Resampling.LANCZOS)
-    return standing_at(image, CORNERED_CENTER - image.width // 2)
+    return standing_at(image, min(center - image.width // 2, FIGHT_WIDTH - image.width))
 
 
 def corpse_image(archive, group):
@@ -339,19 +355,28 @@ def centered(image, x, y):
     return canvas
 
 
-def spell_frames(archive, missile, effect):
+def spell_frames(archive, missile, effect, level=False):
     """The missile flying east, then the hit on the monster."""
     shot = frame(archive, missile, 0, 2, 1).resize((MISSILE_SIZE, MISSILE_SIZE), Image.Resampling.LANCZOS)
-    frames = [centered(shot, round(MISSILE_START + (MONSTER_CENTER - MISSILE_START) * step / (FLIGHT_STEPS - 1)),
-                       SPELL_HEIGHT)
+    y = SPELL_HEIGHT
+    if level:
+        top, bottom = shot.getbbox()[1::2]
+        y += (MISSILE_SIZE - top - bottom) // 2
+    frames = [centered(shot, round(MISSILE_START + (MONSTER_CENTER - MISSILE_START) * step / (FLIGHT_STEPS - 1)), y)
               for step in range(FLIGHT_STEPS)]
+    return frames + hit_frames(archive, effect)
+
+
+def hit_frames(archive, effect, size=EFFECT_TILE):
+    """An effect playing on the monster."""
+    frames = []
     width, height = effect["width"], effect["height"]
     for point in HIT_STEPS:
         hit = frame(archive, effect, round((effect["phases"] - 1) * point), 0)
-        hit = hit.resize((width * EFFECT_TILE, height * EFFECT_TILE), Image.Resampling.LANCZOS)
+        hit = hit.resize((width * size, height * size), Image.Resampling.LANCZOS)
         # Effects anchor on their bottom-right tile.
-        frames.append(centered(hit, MONSTER_CENTER - (width - 1) * EFFECT_TILE // 2,
-                               SPELL_HEIGHT - (height - 1) * EFFECT_TILE // 2))
+        frames.append(centered(hit, MONSTER_CENTER - (width - 1) * size // 2,
+                               SPELL_HEIGHT - (height - 1) * size // 2))
     return frames
 
 
@@ -410,7 +435,7 @@ def main():
     parser.add_argument("--loot", type=Path, default=MOD / "loot.js",
                         help="Loot table of the mod (default: mods/agents-tibia/loot.js)")
     parser.add_argument("--fights", type=Path, default=MOD / "fights.js",
-                        help="Monster and spell tables of the mod (default: mods/agents-tibia/fights.js)")
+                        help="Monster and attack tables of the mod (default: mods/agents-tibia/fights.js)")
     parser.add_argument("--outfits", type=Path, default=MOD / "outfits.js",
                         help="Outfit table of the mod (default: mods/agents-tibia/outfits.js)")
     parser.add_argument("--colors", type=Path,
@@ -425,8 +450,10 @@ def main():
     loot = load_table(args.loot, "LOOT")
     monster_ids = load_table(args.fights, "MONSTERS")
     monsters = list(zip(monster_ids[::2], monster_ids[1::2]))
-    spell_ids = load_table(args.fights, "SPELLS")
+    spell_ids = [number for name in ("SORCERER", "DRUID", "PALADIN") for number in load_table(args.fights, name)]
     spells = list(zip(spell_ids[::2], spell_ids[1::2]))
+    if len({missile for missile, _ in spells}) != len(spells):
+        raise ValueError(f"A missile id appears twice in {args.fights}")
 
     attack_group = dat.group("effects", ATTACK_EFFECT)
     attack_ids = [sprite_index(attack_group, phase, 0, 0, 0, 0, 0, 0)
@@ -440,9 +467,12 @@ def main():
 
     monster_images = {look: monster_image(archive, dat.group("outfits", look)) for look, _ in monsters}
     corpse_images = {look: corpse_image(archive, dat.group("items", corpse)) for look, corpse in monsters}
-    pool = blood_pool(archive, dat.group("items", POOL_ITEM))
-    spell_images = {missile: spell_frames(archive, dat.group("missiles", missile), dat.group("effects", effect))
+    pool = blood_pool(archive, dat.group("items", POOL_ITEM), CORNERED_CENTER)
+    monster_pool = blood_pool(archive, dat.group("items", POOL_ITEM), MONSTER_CENTER)
+    spell_images = {missile: spell_frames(archive, dat.group("missiles", missile), dat.group("effects", effect),
+                                          missile in LOW_MISSILES)
                     for missile, effect in spells}
+    blood_images = hit_frames(archive, attack_group, BLOOD_SIZE)
 
     sleep_images = sleep_frames(archive, dat.group("effects", SLEEP_EFFECT))
 
@@ -452,6 +482,7 @@ def main():
         save_sprite(sprites, Path("sleep") / f"{phase}.png", image)
     clear_sprites(sprites, "monsters")
     clear_sprites(sprites, "spells")
+    clear_sprites(sprites, "blood")
     clear_sprites(sprites, "melee")
     clear_sprites(sprites, "cornered")
     clear_sprites(sprites, "corpses")
@@ -467,6 +498,9 @@ def main():
         for step, image in enumerate(monster_flee(archive, dat.group("outfits", look))):
             save_sprite(sprites, Path("monsters") / f"{look}-flee-{step}.png", image)
     save_sprite(sprites, Path("cornered") / "pool.png", pool)
+    save_sprite(sprites, Path("blood") / "pool.png", monster_pool)
+    for step, image in enumerate(blood_images):
+        save_sprite(sprites, Path("blood") / f"{step}.png", image)
     for missile, frames in spell_images.items():
         for step, image in enumerate(frames):
             save_sprite(sprites, Path("spells") / f"{missile}-{step}.png", image)
